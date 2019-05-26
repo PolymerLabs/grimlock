@@ -21,29 +21,82 @@ suite('grimlock', () => {
   suite('lit-html', () => {
 
     test('simple template', () => {
+      assert.equal(convertModule('test.ts', `
+        import {html} from 'lit-html';
 
-      const host = new TestHost({
-        'test.ts': `
-          import {html} from 'lit-html';
+        /**
+         * @soyCompatible
+         */
+        export const t = () => html\`<div></div>\`;
+      `), `{namespace test.ts}
 
-          export const t = () => html\`<div></div>\`;
-        `
-      });
+{template .t}
+<div></div>
+{/template}
+`);
+    });
 
-      const program = ts.createProgram(['test.ts'], {
-        target: ts.ScriptTarget.ES2017,
-        module: ts.ModuleKind.ESNext,
-      }, host);
-      const checker = program.getTypeChecker();    
-      const sourceFile = program.getSourceFile('test.ts')!;
-      const converter = new SourceFileConverter(sourceFile, checker);
-      converter.checkFile();
-      assert.equal(converter.buffer.join(''), `{namespace test.ts}\n`);
+    test('param and expression', () => {
+      assert.equal(convertModule('test.ts', `
+        import {html} from 'lit-html';
+
+        /**
+         * @soyCompatible
+         */
+        export const t = (a: string) => html\`<div>\${a}</div>\`;
+      `), `{namespace test.ts}
+
+{template .t}
+  {@param a: string}
+<div>{$a}</div>
+{/template}
+`);
+    });
+
+    test('subtemplate call', () => {
+      assert.equal(convertModule('test.ts', `
+        import {html} from 'lit-html';
+
+        /**
+         * @soyCompatible
+         */
+        export const t2 = () => html\`<div>\${t2()}</div>\`;
+
+        /**
+         * @soyCompatible
+         */
+        export const t1 = () => html\`<div></div>\`;
+      `), `{namespace test.ts}
+
+{template .t2}
+<div>{call .t2}</div>
+{/template}
+
+{template .t1}
+<div></div>
+{/template}
+`);
     });
 
   });
 
 });
+
+
+const convertModule = (fileName: string, source: string) => {
+  const host = new TestHost({
+    [fileName]: source,
+  });
+  const program = ts.createProgram([fileName], {
+    target: ts.ScriptTarget.ES2017,
+    module: ts.ModuleKind.ESNext,
+  }, host);
+  const checker = program.getTypeChecker();    
+  const sourceFile = program.getSourceFile(fileName)!;
+  const converter = new SourceFileConverter(sourceFile, checker);
+  converter.checkFile();
+  return converter.buffer.join('')
+};
 
 class TestHost implements ts.CompilerHost {
   files: Map<string, string>;

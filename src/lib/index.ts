@@ -122,7 +122,7 @@ export class SourceFileConverter {
     this.out(`\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`);
     // TODO: check parameters
     for (const param of node.parameters) {
-      this.out(`  {@param ${param.name.getText()}: ${param.type!.getText()}}`);
+      this.out(`  {@param ${param.name.getText()}: ${param.type!.getText()}}\n`);
     }
 
     // TODO: check type parameters?
