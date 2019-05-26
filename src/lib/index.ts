@@ -122,7 +122,12 @@ export class SourceFileConverter {
     this.out(`\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`);
     // TODO: check parameters
     for (const param of node.parameters) {
-      this.out(`  {@param ${param.name.getText()}: ${param.type!.getText()}}\n`);
+      const type = this.soyTypeOf(param);
+      const name = param.name.getText();
+      if (type === undefined) {
+        this.report(param, `parameters must have a declared type`);
+      }
+      this.out(`  {@param ${name}${type === undefined ? '' : `: ${type}`}}\n`);
     }
 
     // TODO: check type parameters?
@@ -225,6 +230,17 @@ export class SourceFileConverter {
     } else {
       ts.forEachChild(node, (n) => this.checkNode(n));
     }
+  }
+  
+  soyTypeOf(node: ts.Node): string | undefined {
+    if (node.kind === ts.SyntaxKind.Parameter) {
+      const param = node as ts.ParameterDeclaration;
+      if (param.type === undefined) {
+        return undefined;
+      }
+      return param.type.getText();
+    }
+    return undefined;
   }
   
   report(node: ts.Node, message: string) {
