@@ -17,6 +17,12 @@ import {SourceFileConverter} from '../lib/index.js';
 import ts from 'typescript';
 import stripIndent = require('strip-indent');
 
+const stripIndentTag = (strings: TemplateStringsArray, ..._values: any[]) => {
+  return stripIndent(strings[0]).trim();
+};
+const js = stripIndentTag;
+const soy = stripIndentTag;
+
 suite('grimlock', () => {
 
   suite('lit-html', () => {
@@ -151,9 +157,3 @@ class TestHost implements ts.CompilerHost {
     return '\n';
   }
 }
-
-const stripIndentTag = (strings: TemplateStringsArray, ..._values: any[]) => {
-  return stripIndent(strings[0]).trim();
-};
-const js = stripIndentTag;
-const soy = stripIndentTag;
