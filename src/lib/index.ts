@@ -270,6 +270,7 @@ export class SourceFileConverter {
       return 'null';
     }
     // generic fallback.
+    // TODO: validation?
     return typeNode.getText();
   }
   
