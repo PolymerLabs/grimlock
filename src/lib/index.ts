@@ -13,6 +13,7 @@
  */
 
 import ts from 'typescript';
+import { isAssignableToType, SimpleType, SimpleTypeKind } from "ts-simple-type";
 
 const litTemplateDeclarations = new Map<ts.VariableDeclaration, ts.ArrowFunction>();
 
@@ -49,6 +50,17 @@ const getVariableDeclaration = (node: ts.Node) => {
 
 const getRenderMethod = (node: ts.ClassDeclaration): ts.MethodDeclaration | undefined => {
   return node.members.find((m) => ts.isMethodDeclaration(m) && m.name.getText() === 'render') as ts.MethodDeclaration;
+};
+
+const booleanType: SimpleType = {kind: SimpleTypeKind.BOOLEAN};
+const numberType: SimpleType = {kind: SimpleTypeKind.NUMBER};
+const stringType: SimpleType = {kind: SimpleTypeKind.STRING};
+const nullishType: SimpleType = {
+  kind: SimpleTypeKind.UNION,
+  types: [
+    {kind: SimpleTypeKind.NULL},
+    {kind: SimpleTypeKind.UNDEFINED},
+  ]
 };
 
 export class SourceFileConverter {
@@ -122,7 +134,12 @@ export class SourceFileConverter {
     this.out(`\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`);
     // TODO: check parameters
     for (const param of node.parameters) {
-      this.out(`  {@param ${param.name.getText()}: ${param.type!.getText()}}\n`);
+      const type = this.soyTypeOf(param);
+      const name = param.name.getText();
+      if (type === undefined) {
+        this.report(param, `parameters must have a declared type`);
+      }
+      this.out(`  {@param ${name}${type === undefined ? '' : `: ${type}`}}\n`);
     }
 
     // TODO: check type parameters?
@@ -225,6 +242,36 @@ export class SourceFileConverter {
     } else {
       ts.forEachChild(node, (n) => this.checkNode(n));
     }
+  }
+  
+  /**
+   * Intended to return the Soy type equivalent to the TypeScript type of the
+   * given node. Beause Soy has a fairly expressive type system with union
+   * types, record types, and generics on list and map, we actually want to
+   * traverse and convert the type AST here. For now we'll use some simple
+   * assignability checks.
+   * 
+   * @param node A node like a ParameterDeclaration that has a .type property.
+   */
+  soyTypeOf(node: ts.HasType): string | undefined {
+    const typeNode = node.type;
+    if (typeNode === undefined) {
+      return undefined;
+    }
+    const type = this.checker.getTypeAtLocation(typeNode);
+
+    if (isAssignableToType(type, booleanType, this.checker)) {
+      return 'bool'
+    } else if (isAssignableToType(type, numberType, this.checker)) {
+      return 'number';
+    } else if (isAssignableToType(type, stringType, this.checker)) {
+      return 'string';
+    } else if (isAssignableToType(type, nullishType, this.checker)) {
+      return 'null';
+    }
+    // generic fallback.
+    // TODO: validation?
+    return typeNode.getText();
   }
   
   report(node: ts.Node, message: string) {

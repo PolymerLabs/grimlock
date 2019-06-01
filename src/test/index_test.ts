@@ -15,46 +15,58 @@
 import {assert} from 'chai';
 import {SourceFileConverter} from '../lib/index.js';
 import ts from 'typescript';
+import stripIndent = require('strip-indent');
+
+const stripIndentTag = (strings: TemplateStringsArray, ..._values: any[]) => {
+  return stripIndent(strings[0]).trim();
+};
+const js = stripIndentTag;
+const soy = stripIndentTag;
 
 suite('grimlock', () => {
 
   suite('lit-html', () => {
 
     test('simple template', () => {
-      assert.equal(convertModule('test.ts', `
+      assert.equal(convertModule('test.ts', js`
         import {html} from 'lit-html';
 
         /**
          * @soyCompatible
          */
         export const t = () => html\`<div></div>\`;
-      `), `{namespace test.ts}
+      `), soy`
+        {namespace test.ts}
 
-{template .t}
-<div></div>
-{/template}
-`);
+        {template .t}
+        <div></div>
+        {/template}
+      `);
     });
 
-    test('param and expression', () => {
-      assert.equal(convertModule('test.ts', `
+    test('parameters and expression', () => {
+      assert.equal(convertModule('test.ts', js`
         import {html} from 'lit-html';
 
         /**
          * @soyCompatible
          */
-        export const t = (a: string) => html\`<div>\${a}</div>\`;
-      `), `{namespace test.ts}
+        export const t = (a: string, b: number, c: boolean) => 
+            html\`<div>\${a}\${b}\${c}</div>\`;
+      `), soy`
+        {namespace test.ts}
 
-{template .t}
-  {@param a: string}
-<div>{$a}</div>
-{/template}
-`);
+        {template .t}
+          {@param a: string}
+          {@param b: number}
+          {@param c: bool}
+        <div>{$a}{$b}{$c}</div>
+        {/template}
+      `);
     });
 
     test('subtemplate call', () => {
-      assert.equal(convertModule('test.ts', `
+      assert.equal(convertModule('test.ts', js`
         import {html} from 'lit-html';
 
         /**
@@ -66,16 +78,17 @@ suite('grimlock', () => {
          * @soyCompatible
          */
         export const t1 = () => html\`<div></div>\`;
-      `), `{namespace test.ts}
+      `), soy`
+        {namespace test.ts}
 
-{template .t2}
-<div>{call .t2}</div>
-{/template}
+        {template .t2}
+        <div>{call .t2}</div>
+        {/template}
 
-{template .t1}
-<div></div>
-{/template}
-`);
+        {template .t1}
+        <div></div>
+        {/template}
+      `);
     });
 
   });
@@ -95,7 +108,7 @@ const convertModule = (fileName: string, source: string) => {
   const sourceFile = program.getSourceFile(fileName)!;
   const converter = new SourceFileConverter(sourceFile, checker);
   converter.checkFile();
-  return converter.buffer.join('')
+  return converter.buffer.join('').trim();
 };
 
 class TestHost implements ts.CompilerHost {
