@@ -116,7 +116,7 @@ export class SourceFileConverter {
       if (expression!.kind !== ts.SyntaxKind.TaggedTemplateExpression) {
         this.report(node, 'litTemplates must directly return a TemplateResult');
       }  
-      this.checkLitTemplateExpression(expression as ts.TaggedTemplateExpression);
+      this.checkLitTemplateExpression(expression as ts.TaggedTemplateExpression, node);
     }
 
     this.out(`\n{/template}\n`);
@@ -154,16 +154,42 @@ export class SourceFileConverter {
     node.typeParameters;
 
     // check body
-    this.checkLitTemplateBody(node.body);
+    this.checkLitTemplateBody(node.body, node);
     this.out(`\n{/template}\n`);
   }
 
-  checkLitTemplateBody(node: ts.ConciseBody) {
-    if (node.kind !== ts.SyntaxKind.TaggedTemplateExpression) {
-      this.report(node, 'litTemplates must directly return a TemplateResult');
+  checkLitTemplateBody(node: ts.ConciseBody, f: ts.FunctionLikeDeclarationBase) {
+    if (ts.isBlock(node)) {
+      let hasReturn = false;
+      ts.forEachChild(node, (n) => {
+        hasReturn = hasReturn || this.checkLitTemplateStatement(n, f);
+      });
+      if (!hasReturn) {
+        this.report(node, 'litTemplates must return a TemplateResult');
+      }
+      return;
     }
-    this.checkLitTemplateExpression(node as ts.TaggedTemplateExpression);
+    if (ts.isTaggedTemplateExpression(node)) {
+      this.checkLitTemplateExpression(node, f);
+      return;
+    }
+    this.report(node, 'litTemplates must return a TemplateResult');
   };
+
+  checkLitTemplateStatement(node: ts.Node, f: ts.FunctionLikeDeclarationBase): boolean {
+    if (ts.isReturnStatement(node)) {
+      if (node.expression === undefined) {
+        this.report(node, 'litTemplates must return a TemplateResult');
+        return true;
+      }
+      if (ts.isTaggedTemplateExpression(node.expression)) {
+        this.checkLitTemplateExpression(node.expression, f);
+        return true;
+      }
+    }
+    this.report(node, 'unsupported statement');
+    return false;
+  }
 
   checkIsLitHtmlTag(tag: ts.Node) {
     const failMessage = 'template tags must be named imports from the modules' +
@@ -197,7 +223,7 @@ export class SourceFileConverter {
     return aliased.name === 'html';
   }
 
-  checkLitTemplateExpression(node: ts.TaggedTemplateExpression) {
+  checkLitTemplateExpression(node: ts.TaggedTemplateExpression, f: ts.FunctionLikeDeclarationBase) {
     if (!this.checkIsLitHtmlTag(node.tag)) {
       return;
     }
@@ -207,12 +233,11 @@ export class SourceFileConverter {
       this.out(template.head.text);
       for (const span of template.templateSpans) {
         this.out('{');
-        this.checkExpression(span.expression);
+        this.checkExpression(span.expression, f);
         this.out('}');
         this.out(span.literal.text);
       }
     } else {
-      // console.log('BBB', ts.SyntaxKind[template.kind]);
       this.out((template as any).text);
     }
   }
@@ -228,17 +253,22 @@ export class SourceFileConverter {
       this.report(node, `unknown identifier: ${node.getText()}`);
       return;
     }
-    // TODO: when can we have multiple declarations?
-    const declaration = declarations[0];
-    return declaration;
+    if (declarations.length > 1) {
+      this.report(node, 'multiple declarations');
+    }
+    return declarations[0];
   }
 
-  checkExpression(node: ts.Expression) {
+  checkExpression(node: ts.Expression, f: ts.FunctionLikeDeclarationBase) {
     switch (node.kind) {
       case ts.SyntaxKind.Identifier: {
         const declaration = this.getIdentifierDeclaration(node as ts.Identifier);
         if (declaration !== undefined && declaration.kind === ts.SyntaxKind.Parameter) {
-          // TODO: check that it's a local parameter, from an outer function
+          // TODO: test this check
+          if ((declaration as ts.ParameterDeclaration).parent !== f) {
+            this.report(node, 'identifier references non-local parameter');
+            return;
+          }
           this.out(`$${node.getText()}`);
         }
         return;
@@ -264,7 +294,7 @@ export class SourceFileConverter {
       }
       case ts.SyntaxKind.BinaryExpression: {
         const operator = (node as ts.BinaryExpression).operatorToken;
-        this.checkExpression((node as ts.BinaryExpression).left);
+        this.checkExpression((node as ts.BinaryExpression).left, f);
         switch (operator.kind) {
           case ts.SyntaxKind.AmpersandAmpersandToken:
             this.out(' and ');
@@ -292,7 +322,7 @@ export class SourceFileConverter {
             this.report(operator, '!== is disallowed. Use !=');
             break;
           }
-        this.checkExpression((node as ts.BinaryExpression).right);
+        this.checkExpression((node as ts.BinaryExpression).right, f);
         break;
       }
       case ts.SyntaxKind.PrefixUnaryExpression:        
@@ -300,14 +330,6 @@ export class SourceFileConverter {
       default:
         this.report(node, `unsuported expression: ${node.getText()}`);
         return;
-    }
-  }
-
-  checkNode(node: ts.Node) {
-    if (isLitTemplateFunctionDeclaration(node)) {
-      this.checkLitTemplateFunctionDeclaration(node);
-    } else {
-      ts.forEachChild(node, (n) => this.checkNode(n));
     }
   }
   
