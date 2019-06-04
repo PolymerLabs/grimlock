@@ -63,8 +63,16 @@ const nullishType: SimpleType = {
   ]
 };
 
+export interface Diagnostic {
+  fileName: string;
+  line: number;
+  character: number;
+  message: string;
+};
+
 export class SourceFileConverter {
   buffer: string[] = [];
+  diagnostics: Diagnostic[] = [];
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
 
@@ -157,9 +165,42 @@ export class SourceFileConverter {
     this.checkLitTemplateExpression(node as ts.TaggedTemplateExpression);
   };
 
+  checkIsLitHtmlTag(tag: ts.Node) {
+    const failMessage = 'template tags must be named imports from the modules' +
+        ' "lit-html" or "lit-element"';
+    if (!ts.isIdentifier(tag)) {
+      this.report(tag, failMessage);
+      return false;
+    }
+    const symbol = this.checker.getSymbolAtLocation(tag);
+    if (symbol === undefined || symbol.declarations.length === 0) {
+      this.report(tag, failMessage);
+      return false;
+    }
+    const declaration = symbol.declarations[0];
+    if (declaration.kind !== ts.SyntaxKind.ImportSpecifier || 
+      declaration.parent.kind !== ts.SyntaxKind.NamedImports) {
+        this.report(tag, failMessage);
+        return false;
+    }
+    const aliased = this.checker.getAliasedSymbol(symbol);
+    if (aliased.declarations === undefined) {
+      this.report(tag, failMessage);
+      return false;
+    }
+    const originalDeclaration = aliased.declarations[0];
+    const originalDeclarationFileName = originalDeclaration.getSourceFile().fileName;
+    if (!originalDeclarationFileName.endsWith('/node_modules/lit-html/lit-html.d.ts')) {
+      this.report(tag, failMessage);
+      return false;
+    }
+    return aliased.name === 'html';
+  }
+
   checkLitTemplateExpression(node: ts.TaggedTemplateExpression) {
-    // TODO: validate html tag
-    node.tag;
+    if (!this.checkIsLitHtmlTag(node.tag)) {
+      return;
+    }
 
     const template = node.template as ts.TemplateExpression;
     if (template.head !== undefined) {
@@ -278,13 +319,20 @@ export class SourceFileConverter {
     const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(
       node.getStart()
     );
-    console.log(
-      `${this.sourceFile.fileName} (${line + 1},${character + 1}): ${message}`
-    );
+    this.diagnostics.push({
+      fileName: this.sourceFile.fileName,
+      line,
+      character,
+      message,
+    });
   }
 
   out(s: string) {
     this.buffer.push(s);
+  }
+
+  get output() {
+    return this.buffer.join('').trim();
   }
 }
 
