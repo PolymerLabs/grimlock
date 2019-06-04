@@ -215,6 +215,46 @@ suite('grimlock', () => {
         assert.include(result.diagnostics[0].message, '=== is disallowed');
         assert.include(result.diagnostics[1].message, '!== is disallowed');
       });
+
+      test('Array.length', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string[]) => html\`\${a.length}\`;
+        `);
+        assert.equal(result.output, soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: list<string>}
+          {length($a)}
+          {/template}
+        `);
+        assert.equal(result.diagnostics.length, 0);
+      });
+
+      test('String.length', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string) => html\`\${a.length}\`;
+        `);
+        assert.equal(result.output, soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: string}
+          {strLen($a)}
+          {/template}
+        `);
+        assert.equal(result.diagnostics.length, 0);
+      });
       
     });
 
@@ -230,15 +270,22 @@ const convertModule = (fileName: string, source: string) => {
   const program = ts.createProgram([fileName], {
     target: ts.ScriptTarget.ES2017,
     module: ts.ModuleKind.ESNext,
+    skipDefaultLibCheck: true,
+    skipLibCheck: true,
   }, host);
-  const checker = program.getTypeChecker();    
+  const checker = program.getTypeChecker();   
   const sourceFile = program.getSourceFile(fileName)!;
+  // TODO: assert 0 diagnostics for most tests
+  // const diagnostics = program.getSemanticDiagnostics(sourceFile);
+  // console.log(diagnostics.length);
   const converter = new SourceFileConverter(sourceFile, checker);
   converter.checkFile();
   return converter;
 };
 
-const litHtmlRoot = path.resolve(__dirname, '../node_modules/lit-html/');
+const packageRoot = path.resolve(__dirname, '../');
+
+const fileCache = new Map<string, string>();
 
 class TestHost implements ts.CompilerHost {
   files: Map<string, string>;
@@ -250,7 +297,7 @@ class TestHost implements ts.CompilerHost {
   resolveModuleNames(moduleNames: string[], _containingFile: string): (ts.ResolvedModule | undefined)[] {
     const resolvedNames = moduleNames.map((n) => {
       if (n === 'lit-html') {
-        const resolvedFileName = path.resolve(__dirname, '../node_modules/lit-html/lit-html.d.ts');
+        const resolvedFileName = path.resolve(packageRoot, 'node_modules/lit-html/lit-html.d.ts');
         return {
           resolvedFileName,
           isExternalLibraryImport: false,
@@ -262,12 +309,29 @@ class TestHost implements ts.CompilerHost {
   }
 
   fileExists(fileName: string): boolean {
-    return this.files.has(fileName) || fileName.startsWith(litHtmlRoot);
+    if (this.files.has(fileName)) {
+      return true;
+    }
+    if (!fileName.startsWith(packageRoot)) {
+      return false;
+    }
+    try {
+      fs.statSync(fileName);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   readFile(fileName: string): string | undefined {
-    if (fileName.startsWith(litHtmlRoot)) {
-      return fs.readFileSync(fileName, 'utf-8');
+    if (fileName.startsWith(packageRoot)) {
+      let contents = fileCache.get(fileName);
+      if (contents !== undefined) {
+        return contents;
+      }
+      contents = fs.readFileSync(fileName, 'utf-8');
+      fileCache.set(fileName, contents);
+      return contents;
     }
     return this.files.get(fileName);
   }
@@ -281,8 +345,8 @@ class TestHost implements ts.CompilerHost {
     return undefined;
   }
 
-  getDefaultLibFileName(_options: ts.CompilerOptions): string {
-    return '';
+  getDefaultLibFileName(options: ts.CompilerOptions): string {
+    return ts.getDefaultLibFilePath(options);
   }
 
   writeFile: ts.WriteFileCallback = undefined as any;
