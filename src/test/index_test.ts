@@ -90,6 +90,25 @@ suite('grimlock', () => {
         `);
       });
 
+      test('error on unsupported statements', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string) => {
+            /**
+             * @soyCompatible
+             */
+            const inner = () => html\`\${a}\`;
+          };
+        `);
+        assert.equal(result.diagnostics.length, 2);
+        assert.include(result.diagnostics[0].message, 'unsupported statement');
+        assert.include(result.diagnostics[1].message, 'must return a TemplateResult');
+      });
+
     });
 
     suite('expressions', () => {
@@ -120,7 +139,7 @@ suite('grimlock', () => {
         `);
       });
 
-      test('unknown reference', () => {
+      test('error on unknown reference', () => {
         const result = convertModule('test.ts', js`
           import {html} from 'lit-html';
 
