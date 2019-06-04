@@ -331,6 +331,32 @@ suite('grimlock', () => {
         );
         assert.equal(result.diagnostics.length, 0);
       });
+
+      test('String.includes()', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string) => html\`\${a.includes('a')}\`;
+        `
+        );
+        assert.equal(
+          result.output,
+          soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: string}
+          {strContains($a, 'a')}
+          {/template}
+        `
+        );
+        assert.equal(result.diagnostics.length, 0);
+      });
     });
   });
 });
