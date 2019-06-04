@@ -120,6 +120,60 @@ suite('grimlock', () => {
         `);
       });
 
+      test('unknown reference', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = () => html\`\${a}\`;
+        `);
+        assert.equal(result.diagnostics.length, 1);
+        assert.include(result.diagnostics[0].message, 'unknown identifier');
+      });
+
+      test('references to parameters', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string) => html\`\${a}\`;
+        `);
+        assert.equal(result.output, soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: string}
+          {$a}
+          {/template}
+        `);
+        assert.equal(result.diagnostics.length, 0);
+      });
+
+      test('binary + operator on strings', () => {
+        const result = convertModule('test.ts', js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string, b: string) => html\`\${a + b}\`;
+        `);
+        assert.equal(result.output, soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: string}
+            {@param b: string}
+          {$a+$b}
+          {/template}
+        `);
+        assert.equal(result.diagnostics.length, 0);
+      });
+      
     });
 
   });

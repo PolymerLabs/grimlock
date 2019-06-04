@@ -217,64 +217,90 @@ export class SourceFileConverter {
     }
   }
 
+  getIdentifierDeclaration(node: ts.Identifier) {
+    const symbol = this.checker.getSymbolAtLocation(node)!;
+    if (symbol === undefined) {
+      this.report(node, `unknown identifier: ${node.getText()}`);
+      return;
+    }
+    const declarations = symbol.getDeclarations();
+    if (declarations === undefined) {
+      this.report(node, `unknown identifier: ${node.getText()}`);
+      return;
+    }
+    // TODO: when can we have multiple declarations?
+    const declaration = declarations[0];
+    return declaration;
+  }
+
   checkExpression(node: ts.Expression) {
     switch (node.kind) {
-      case ts.SyntaxKind.Identifier:
-        const symbol = this.checker.getSymbolAtLocation(node)!;
-        const declarations = symbol.getDeclarations();
-        // console.log(declarations);
-        if (declarations === undefined) {
-          this.report(node, 'no declarations');
-        } else {
-          for (const declaration of declarations) {
-            if (declaration.kind === ts.SyntaxKind.Parameter) {
-              // TODO: check that it's a local declaration, not a free variable...
-              // ok
-              this.out(`$${node.getFullText()}`);
-            } else if (declaration.kind === ts.SyntaxKind.VariableDeclaration) {
-              // TODO: this is in the wrong place, we should only do this if we know
-              // we're in a call expression
-              const litTemplate = litTemplateDeclarations.get(declaration as ts.VariableDeclaration);
-              if (litTemplate !== undefined) {
-                this.out(`call .${(declaration as ts.VariableDeclaration).name.getText()}`);
-              } else {
-                this.report(node, 'unknown identifier');
-              }
-            }
-          }
+      case ts.SyntaxKind.Identifier: {
+        const declaration = this.getIdentifierDeclaration(node as ts.Identifier);
+        if (declaration !== undefined && declaration.kind === ts.SyntaxKind.Parameter) {
+          // TODO: check that it's a local parameter, from an outer function
+          this.out(`$${node.getText()}`);
         }
-        // console.log(`symbol for ${node.getFullText()}`, symbol);
-        // const type = checker.getContextualType(node);
-        // console.log(`identifier type for ${node.getFullText()}`, type);
-        // this.out(`$${node.getFullText()}`);
-        break;
-      case ts.SyntaxKind.PlusToken:
-      case ts.SyntaxKind.MinusToken:
-      case ts.SyntaxKind.AsteriskToken:
-      case ts.SyntaxKind.SlashToken:
-      case ts.SyntaxKind.NumericLiteral:
+        return;
+      }
       case ts.SyntaxKind.StringLiteral:
         this.out(node.getFullText());
         break;
-      case ts.SyntaxKind.AmpersandAmpersandToken:
-        this.out(' and ');
-        break;
-      case ts.SyntaxKind.ExclamationToken:
-        this.out(' not ');
-        break;
-      case ts.SyntaxKind.CallExpression:
-        // TODO: call into a CallExpression handler with logic from above
-        // Identifier logic
-      case ts.SyntaxKind.BinaryExpression:
-      case ts.SyntaxKind.PrefixUnaryExpression:
-        // continue
-        break;
-      default:
-        this.report(node, `unsupoorted expression: ${node.getText()}`);
+      case ts.SyntaxKind.CallExpression: {
+        const call = node as ts.CallExpression;
+        if (!ts.isIdentifier(call.expression)) {
+          this.report(node, 'only template functions can be called');
+          return;
+        }
+        const declaration = this.getIdentifierDeclaration(call.expression as ts.Identifier);
+        if (declaration !== undefined && declaration.kind === ts.SyntaxKind.VariableDeclaration) {
+          const litTemplate = litTemplateDeclarations.get(declaration as ts.VariableDeclaration);
+          if (litTemplate !== undefined) {
+            this.out(`call .${call.expression.getText()}`);
+          }
+        }
+        this.report(node, `unknown identifier: ${node.getText()}`);
         return;
+      }
+      case ts.SyntaxKind.BinaryExpression: {
+        const operator = (node as ts.BinaryExpression).operatorToken;
+        this.checkExpression((node as ts.BinaryExpression).left);
+        switch (operator.kind) {
+          case ts.SyntaxKind.AmpersandAmpersandToken:
+            this.out(' and ');
+            break;
+          case ts.SyntaxKind.BarBarToken:
+            this.out(' or ');
+            break;
+          case ts.SyntaxKind.PlusToken:
+          case ts.SyntaxKind.MinusToken:
+          case ts.SyntaxKind.AsteriskToken:
+          case ts.SyntaxKind.SlashToken:
+          case ts.SyntaxKind.PercentToken:
+          case ts.SyntaxKind.GreaterThanToken:
+          case ts.SyntaxKind.LessThanToken:
+          case ts.SyntaxKind.GreaterThanEqualsToken:
+          case ts.SyntaxKind.LessThanEqualsToken:
+          case ts.SyntaxKind.EqualsEqualsToken:
+          case ts.SyntaxKind.ExclamationEqualsToken:
+            this.out(operator.getText());
+            break;
+          case ts.SyntaxKind.EqualsEqualsEqualsToken:
+            this.report(operator, '=== is disallowed. Use ==');
+            break;
+          case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+            this.report(operator, '!== is disallowed. Use !=');
+            break;
+          }
+        this.checkExpression((node as ts.BinaryExpression).right);
         break;
+      }
+      case ts.SyntaxKind.PrefixUnaryExpression:        
+        // TODO
+      default:
+        this.report(node, `unsuported expression: ${node.getText()}`);
+        return;
     }
-    ts.forEachChild(node, (c) => this.checkExpression(c as any));
   }
 
   checkNode(node: ts.Node) {
