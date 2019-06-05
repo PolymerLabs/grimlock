@@ -14,13 +14,13 @@
 
 import ts from 'typescript';
 import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
+import {soy} from './utils.js';
+import * as path from 'path';
 
 const litTemplateDeclarations = new Map<
   ts.VariableDeclaration,
   ts.ArrowFunction
 >();
-
-const pathToNamespace = (path: string) => path.replace(/\//g, '.');
 
 const isSoyCompatible = (node: ts.Node) =>
   ts.getJSDocTags(node).some((t) => t.tagName.escapedText === 'soyCompatible');
@@ -89,12 +89,18 @@ export class SourceFileConverter {
   diagnostics: Diagnostic[] = [];
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
+  rootDir: string;
 
   _stringIncludesSymbol: ts.Symbol;
 
-  constructor(sourceFile: ts.SourceFile, checker: ts.TypeChecker) {
+  constructor(
+    sourceFile: ts.SourceFile,
+    checker: ts.TypeChecker,
+    rootDir: string
+  ) {
     this.sourceFile = sourceFile;
     this.checker = checker;
+    this.rootDir = rootDir;
 
     const symbols = this.checker.getSymbolsInScope(
       sourceFile,
@@ -104,8 +110,13 @@ export class SourceFileConverter {
     this._stringIncludesSymbol = stringSymbol.members!.get('includes' as any)!;
   }
 
+  get soyNamespace() {
+    const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
+    return localPath.replace(/\//g, '.');
+  }
+
   checkFile() {
-    this.out(`{namespace ${pathToNamespace(this.sourceFile.fileName)}}\n`);
+    this.out(`{namespace ${this.soyNamespace}}\n`);
 
     ts.forEachChild(this.sourceFile, (node) => {
       if (isLitTemplateFunctionDeclaration(node)) {
@@ -116,20 +127,79 @@ export class SourceFileConverter {
     });
   }
 
+  getCustomElementName(node: ts.ClassDeclaration): string | undefined {
+    if (node.decorators === undefined) {
+      return;
+    }
+    for (const decorator of node.decorators) {
+      if (!ts.isCallExpression(decorator.expression)) {
+        return;
+      }
+      const call = decorator.expression;
+      if (!ts.isIdentifier(call.expression)) {
+        return;
+      }
+      const ident = call.expression;
+      const symbol = this.checker.getSymbolAtLocation(ident);
+      if (symbol === undefined || symbol.declarations.length === 0) {
+        return;
+      }
+      const declaration = symbol.declarations[0];
+      if (
+        declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
+        declaration.parent.kind !== ts.SyntaxKind.NamedImports
+      ) {
+        return;
+      }
+      const imports = declaration.parent as ts.NamedImports;
+      const importDeclaration = imports.parent.parent;
+      const specifier = importDeclaration.moduleSpecifier as ts.StringLiteral;
+      if (
+        declaration.getText() === 'customElement' &&
+        specifier.text === 'lit-element/lib/decorators.js'
+      ) {
+        const args = call.arguments;
+        if (args.length !== 1) {
+          this.report(call, 'wrong number of arguments to customElement');
+          return;
+        }
+        const arg = args[0];
+        if (!ts.isStringLiteral(arg)) {
+          this.report(call, 'customElement argument must be a string literal');
+          return;
+        }
+        return arg.text;
+      }
+    }
+    return;
+  }
+
   checkLitElement(node: ts.ClassDeclaration) {
+    if (node.name === undefined) {
+      this.report(node, 'LitElement classes must be named');
+      return;
+    }
+    const className = node.name.getText();
+    const tagName = this.getCustomElementName(node);
+    this.out(soy`
+      {template .${className}}
+        {$param children: string}
+        <${tagName}>{$children}</${tagName}>
+      {/template}
+      `);
     // get render method
     const render = getRenderMethod(node);
     if (render === undefined) {
       this.report(node, 'no render method found');
       return;
     }
-    this.checkRenderMethod(render!);
+    this.checkRenderMethod(render, node, className);
   }
 
-  checkRenderMethod(node: ts.MethodDeclaration) {
-    this.out(
-      `\n{template .${(node.parent as ts.ClassDeclaration).name!.getText()}}\n`
-    );
+  checkRenderMethod(node: ts.MethodDeclaration, clazz: ts.ClassDeclaration, className: string) {
+    this.out(soy`
+      {template .${className}_shadow}
+    `);
 
     const statements = node.body!.statements;
     if (statements.length !== 1) {
@@ -147,7 +217,9 @@ export class SourceFileConverter {
       );
     }
 
-    this.out(`\n{/template}\n`);
+    this.out(soy`
+      {/template}
+    `);
   }
 
   checkLitTemplateFunctionDeclaration(node: ts.VariableStatement) {
@@ -427,7 +499,6 @@ export class SourceFileConverter {
         break;
       }
       default:
-        console.log(ts.SyntaxKind[node.kind]);
         this.report(node, `unsuported expression: ${node.getText()}`);
         return;
     }
@@ -548,7 +619,7 @@ export const checkProgram = (fileNames: string[]) => {
     const sourceFile = program.getSourceFile(fileName)!;
     console.log(`\nINPUT: ${sourceFile.fileName}`);
     console.log(sourceFile.getFullText());
-    const converter = new SourceFileConverter(sourceFile, checker);
+    const converter = new SourceFileConverter(sourceFile, checker, __dirname);
     converter.checkFile();
     console.log(`\nOUTPUT`);
     console.log(converter.buffer.join(''));
