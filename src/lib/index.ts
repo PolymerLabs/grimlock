@@ -90,9 +90,18 @@ export class SourceFileConverter {
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
 
+  _stringIncludesSymbol: ts.Symbol;
+
   constructor(sourceFile: ts.SourceFile, checker: ts.TypeChecker) {
     this.sourceFile = sourceFile;
     this.checker = checker;
+
+    const symbols = this.checker.getSymbolsInScope(
+      sourceFile,
+      ts.SymbolFlags.Variable
+    );
+    const stringSymbol = symbols.filter((s) => s.name === 'String')[0];
+    this._stringIncludesSymbol = stringSymbol.members!.get('includes' as any)!;
   }
 
   checkFile() {
@@ -327,6 +336,32 @@ export class SourceFileConverter {
         break;
       case ts.SyntaxKind.CallExpression: {
         const call = node as ts.CallExpression;
+        const func = call.expression;
+        const funcSymbol = this.checker.getSymbolAtLocation(func);
+
+        if (funcSymbol === this._stringIncludesSymbol) {
+          if (!ts.isPropertyAccessExpression(func)) {
+            this.report(call, 'String#includes must be called as a method');
+            return;
+          }
+          const receiver = func.expression;
+          const args = call.arguments;
+          if (args.length !== 1) {
+            this.report(
+              call,
+              'only one argument is allowed to String#includes()'
+            );
+            return;
+          }
+          const arg = args[0];
+          this.out('strContains(');
+          this.checkExpression(receiver, f);
+          this.out(', ');
+          this.checkExpression(arg, f);
+          this.out(')');
+          return;
+        }
+
         if (!ts.isIdentifier(call.expression)) {
           this.report(node, 'only template functions can be called');
           return;
