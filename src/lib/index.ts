@@ -62,6 +62,10 @@ const nullishType: SimpleType = {
     {kind: SimpleTypeKind.UNDEFINED},
   ]
 };
+const arrayType: SimpleType = {
+  kind: SimpleTypeKind.ARRAY,
+  type: {kind: SimpleTypeKind.ANY},
+};
 
 export interface Diagnostic {
   fileName: string;
@@ -142,7 +146,7 @@ export class SourceFileConverter {
     this.out(`\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`);
     // TODO: check parameters
     for (const param of node.parameters) {
-      const type = this.soyTypeOf(param);
+      const type = this.getSoyTypeOfNode(param);
       const name = param.name.getText();
       if (type === undefined) {
         this.report(param, `parameters must have a declared type`);
@@ -259,6 +263,10 @@ export class SourceFileConverter {
     return declarations[0];
   }
 
+  // getTypeOf(node: ts.Node) {
+  //
+  // }
+
   checkExpression(node: ts.Expression, f: ts.FunctionLikeDeclarationBase) {
     switch (node.kind) {
       case ts.SyntaxKind.Identifier: {
@@ -325,12 +333,47 @@ export class SourceFileConverter {
         this.checkExpression((node as ts.BinaryExpression).right, f);
         break;
       }
-      case ts.SyntaxKind.PrefixUnaryExpression:        
-        // TODO
+      // case ts.SyntaxKind.PrefixUnaryExpression:        
+      //   // TODO
+      //   break;
+      case ts.SyntaxKind.PropertyAccessExpression: {
+        this.checkPropertyAccessExpression(node as ts.PropertyAccessExpression, f);
+        break;
+      }
       default:
+        console.log(ts.SyntaxKind[node.kind]);
         this.report(node, `unsuported expression: ${node.getText()}`);
         return;
     }
+  }
+
+  checkPropertyAccessExpression(node: ts.PropertyAccessExpression, f: ts.FunctionLikeDeclarationBase) {
+    const receiver = (node as ts.PropertyAccessExpression).expression;
+    const receiverType = this.checker.getTypeAtLocation(receiver);
+
+    if (receiverType === undefined) {
+      return;
+    }
+    const name = (node as ts.PropertyAccessExpression).name.getText();
+
+    if (isAssignableToType(stringType, receiverType, this.checker)) {
+      if (name === 'length') {
+        this.out('strLen(');
+        this.checkExpression(receiver, f);
+        this.out(')');
+        return;
+      }
+    }
+    if (isAssignableToType(arrayType, receiverType, this.checker)) {
+      if (name === 'length') {
+        this.out('length(');
+        this.checkExpression(receiver, f);
+        this.out(')');
+        return;
+      }
+    }
+    this.checkExpression(receiver, f);
+    this.out(`.${name}`);
   }
   
   /**
@@ -342,13 +385,20 @@ export class SourceFileConverter {
    * 
    * @param node A node like a ParameterDeclaration that has a .type property.
    */
-  soyTypeOf(node: ts.HasType): string | undefined {
+  getSoyTypeOfNode(node: ts.HasType): string | undefined {
     const typeNode = node.type;
     if (typeNode === undefined) {
       return undefined;
     }
     const type = this.checker.getTypeAtLocation(typeNode);
+    const soyType = this.getSoyType(type);
+    if (soyType === undefined) {
+      this.report(node, 'unknown type');
+    }
+    return soyType;
+  }
 
+  getSoyType(type: ts.Type): string | undefined {
     if (isAssignableToType(type, booleanType, this.checker)) {
       return 'bool'
     } else if (isAssignableToType(type, numberType, this.checker)) {
@@ -357,10 +407,24 @@ export class SourceFileConverter {
       return 'string';
     } else if (isAssignableToType(type, nullishType, this.checker)) {
       return 'null';
+    } else if (isAssignableToType(type, arrayType, this.checker)) {
+      const isObjectType = type.flags & ts.TypeFlags.Object;
+      if (!isObjectType) {
+        throw new Error('unexpected type');
+      }
+      const isReferenceType = (type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference;
+      if (!isReferenceType) {
+        throw new Error('unexpected type');
+      }
+      const typeArguments = (type as ts.TypeReference).typeArguments;
+      if (typeArguments === undefined || typeArguments.length === 0) {
+        return 'list';
+      }
+      if (typeArguments.length === 1) {
+        return `list<${this.getSoyType(typeArguments[0])}>`;
+      }
     }
-    // generic fallback.
-    // TODO: validation?
-    return typeNode.getText();
+    return undefined;
   }
   
   report(node: ts.Node, message: string) {
@@ -390,7 +454,7 @@ export const checkProgram = (fileNames: string[]) => {
     target: ts.ScriptTarget.ES2017,
     module: ts.ModuleKind.ESNext,
   });
-  const checker = program.getTypeChecker();    
+  const checker = program.getTypeChecker();
   for (const fileName of fileNames) {
     const sourceFile = program.getSourceFile(fileName)!;
     console.log(`\nINPUT: ${sourceFile.fileName}`);
