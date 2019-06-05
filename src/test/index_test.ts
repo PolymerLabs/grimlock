@@ -19,8 +19,9 @@ import stripIndent = require('strip-indent');
 import * as path from 'path';
 import * as fs from 'fs';
 
-const stripIndentTag = (strings: TemplateStringsArray, ..._values: any[]) => {
-  return stripIndent(strings[0]).trim();
+const stripIndentTag = (strings: TemplateStringsArray, ...values: any[]) => {
+  const result = values.reduce((acc, v, i) => acc + String(v) + strings[i+1], strings[0]);
+  return stripIndent(result).trim();
 };
 const js = stripIndentTag;
 const soy = stripIndentTag;
@@ -172,25 +173,47 @@ suite('grimlock', () => {
         assert.equal(result.diagnostics.length, 0);
       });
 
-      test('binary + operator on strings', () => {
+      const binaryOps = ['+', '-', '*', '/', '%', '<', '>', '>=', '<=', ['||', ' or '], ['&&', ' and ']];
+      for (let op of binaryOps) {
+        let expected = op;
+        if (Array.isArray(op)) {
+          expected = op[1];
+          op = op[0];
+        }
+        test(`binary ${op} operator`, () => {
+          const result = convertModule('test.ts', js`
+            import {html} from 'lit-html';
+
+            /**
+             * @soyCompatible
+             */
+            export const t = (a: string, b: string) => html\`\${a ${op} b}\`;
+          `);
+          assert.equal(result.output, soy`
+            {namespace test.ts}
+
+            {template .t}
+              {@param a: string}
+              {@param b: string}
+            {$a${expected}$b}
+            {/template}
+          `);
+          assert.equal(result.diagnostics.length, 0);
+        });
+      }
+
+      test(`error on strict equality`, () => {
         const result = convertModule('test.ts', js`
           import {html} from 'lit-html';
 
           /**
            * @soyCompatible
            */
-          export const t = (a: string, b: string) => html\`\${a + b}\`;
+          export const t = (a: string, b: string) => html\`\${a === b}\${a !== b}\`;
         `);
-        assert.equal(result.output, soy`
-          {namespace test.ts}
-
-          {template .t}
-            {@param a: string}
-            {@param b: string}
-          {$a+$b}
-          {/template}
-        `);
-        assert.equal(result.diagnostics.length, 0);
+        assert.equal(result.diagnostics.length, 2);
+        assert.include(result.diagnostics[0].message, '=== is disallowed');
+        assert.include(result.diagnostics[1].message, '!== is disallowed');
       });
       
     });
