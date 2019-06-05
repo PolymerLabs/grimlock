@@ -13,32 +13,41 @@
  */
 
 import ts from 'typescript';
-import { isAssignableToType, SimpleType, SimpleTypeKind } from "ts-simple-type";
+import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
 
-const litTemplateDeclarations = new Map<ts.VariableDeclaration, ts.ArrowFunction>();
+const litTemplateDeclarations = new Map<
+  ts.VariableDeclaration,
+  ts.ArrowFunction
+>();
 
 const pathToNamespace = (path: string) => path.replace(/\//g, '.');
 
-const isSoyCompatible = (node: ts.Node) => 
-    ts.getJSDocTags(node).some((t) => t.tagName.escapedText === 'soyCompatible');
+const isSoyCompatible = (node: ts.Node) =>
+  ts.getJSDocTags(node).some((t) => t.tagName.escapedText === 'soyCompatible');
 
-const isLitTemplateFunctionDeclaration = (node: ts.Node): node is ts.VariableStatement => {
+const isLitTemplateFunctionDeclaration = (
+  node: ts.Node
+): node is ts.VariableStatement => {
   if (ts.isVariableStatement(node)) {
     for (const declaration of node.declarationList.declarations) {
-      if (declaration.initializer !== undefined && ts.isArrowFunction(declaration.initializer) && isSoyCompatible(node)) {
+      if (
+        declaration.initializer !== undefined &&
+        ts.isArrowFunction(declaration.initializer) &&
+        isSoyCompatible(node)
+      ) {
         return true;
       }
     }
   }
   return false;
-}
+};
 
-const isLitTemplateFunction = (node: ts.Node): node is ts.ArrowFunction => 
-    ts.isArrowFunction(node) && isSoyCompatible(node);
+const isLitTemplateFunction = (node: ts.Node): node is ts.ArrowFunction =>
+  ts.isArrowFunction(node) && isSoyCompatible(node);
 
-const isLitElement = (node: ts.Node): node is ts.ClassDeclaration => 
-    ts.isClassDeclaration(node) &&
-    ts.getJSDocTags(node).some((t) => t.tagName.escapedText === 'soyCompatible');
+const isLitElement = (node: ts.Node): node is ts.ClassDeclaration =>
+  ts.isClassDeclaration(node) &&
+  ts.getJSDocTags(node).some((t) => t.tagName.escapedText === 'soyCompatible');
 
 const getVariableDeclaration = (node: ts.Node) => {
   let declaration = node;
@@ -48,8 +57,12 @@ const getVariableDeclaration = (node: ts.Node) => {
   return declaration;
 };
 
-const getRenderMethod = (node: ts.ClassDeclaration): ts.MethodDeclaration | undefined => {
-  return node.members.find((m) => ts.isMethodDeclaration(m) && m.name.getText() === 'render') as ts.MethodDeclaration;
+const getRenderMethod = (
+  node: ts.ClassDeclaration
+): ts.MethodDeclaration | undefined => {
+  return node.members.find(
+    (m) => ts.isMethodDeclaration(m) && m.name.getText() === 'render'
+  ) as ts.MethodDeclaration;
 };
 
 const booleanType: SimpleType = {kind: SimpleTypeKind.BOOLEAN};
@@ -57,10 +70,7 @@ const numberType: SimpleType = {kind: SimpleTypeKind.NUMBER};
 const stringType: SimpleType = {kind: SimpleTypeKind.STRING};
 const nullishType: SimpleType = {
   kind: SimpleTypeKind.UNION,
-  types: [
-    {kind: SimpleTypeKind.NULL},
-    {kind: SimpleTypeKind.UNDEFINED},
-  ]
+  types: [{kind: SimpleTypeKind.NULL}, {kind: SimpleTypeKind.UNDEFINED}],
 };
 const arrayType: SimpleType = {
   kind: SimpleTypeKind.ARRAY,
@@ -72,7 +82,7 @@ export interface Diagnostic {
   line: number;
   character: number;
   message: string;
-};
+}
 
 export class SourceFileConverter {
   buffer: string[] = [];
@@ -108,7 +118,9 @@ export class SourceFileConverter {
   }
 
   checkRenderMethod(node: ts.MethodDeclaration) {
-    this.out(`\n{template .${(node.parent as ts.ClassDeclaration).name!.getText()}}\n`);
+    this.out(
+      `\n{template .${(node.parent as ts.ClassDeclaration).name!.getText()}}\n`
+    );
 
     const statements = node.body!.statements;
     if (statements.length !== 1) {
@@ -119,8 +131,11 @@ export class SourceFileConverter {
       const expression = statement1.expression;
       if (expression!.kind !== ts.SyntaxKind.TaggedTemplateExpression) {
         this.report(node, 'litTemplates must directly return a TemplateResult');
-      }  
-      this.checkLitTemplateExpression(expression as ts.TaggedTemplateExpression, node);
+      }
+      this.checkLitTemplateExpression(
+        expression as ts.TaggedTemplateExpression,
+        node
+      );
     }
 
     this.out(`\n{/template}\n`);
@@ -128,14 +143,16 @@ export class SourceFileConverter {
 
   checkLitTemplateFunctionDeclaration(node: ts.VariableStatement) {
     for (const declaration of node.declarationList.declarations) {
-      if (declaration.initializer !== undefined && isLitTemplateFunction(declaration.initializer)) {
+      if (
+        declaration.initializer !== undefined &&
+        isLitTemplateFunction(declaration.initializer)
+      ) {
         this.checkLitTemplateFunction(declaration.initializer);
       }
     }
   }
 
   checkLitTemplateFunction(node: ts.ArrowFunction) {
-
     const declaration = getVariableDeclaration(node);
     if (declaration !== undefined) {
       litTemplateDeclarations.set(declaration, node);
@@ -143,7 +160,9 @@ export class SourceFileConverter {
       this.report(node, 'no declaration found');
     }
 
-    this.out(`\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`);
+    this.out(
+      `\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`
+    );
     // TODO: check parameters
     for (const param of node.parameters) {
       const type = this.getSoyTypeOfNode(param);
@@ -162,7 +181,10 @@ export class SourceFileConverter {
     this.out(`\n{/template}\n`);
   }
 
-  checkLitTemplateBody(node: ts.ConciseBody, f: ts.FunctionLikeDeclarationBase) {
+  checkLitTemplateBody(
+    node: ts.ConciseBody,
+    f: ts.FunctionLikeDeclarationBase
+  ) {
     if (ts.isBlock(node)) {
       let hasReturn = false;
       ts.forEachChild(node, (n) => {
@@ -178,9 +200,12 @@ export class SourceFileConverter {
       return;
     }
     this.report(node, 'litTemplates must return a TemplateResult');
-  };
+  }
 
-  checkLitTemplateStatement(node: ts.Node, f: ts.FunctionLikeDeclarationBase): boolean {
+  checkLitTemplateStatement(
+    node: ts.Node,
+    f: ts.FunctionLikeDeclarationBase
+  ): boolean {
     if (ts.isReturnStatement(node)) {
       if (node.expression === undefined) {
         this.report(node, 'litTemplates must return a TemplateResult');
@@ -196,8 +221,9 @@ export class SourceFileConverter {
   }
 
   checkIsLitHtmlTag(tag: ts.Node) {
-    const failMessage = 'template tags must be named imports from the modules' +
-        ' "lit-html" or "lit-element"';
+    const failMessage =
+      'template tags must be named imports from the modules' +
+      ' "lit-html" or "lit-element"';
     if (!ts.isIdentifier(tag)) {
       this.report(tag, failMessage);
       return false;
@@ -208,10 +234,12 @@ export class SourceFileConverter {
       return false;
     }
     const declaration = symbol.declarations[0];
-    if (declaration.kind !== ts.SyntaxKind.ImportSpecifier || 
-      declaration.parent.kind !== ts.SyntaxKind.NamedImports) {
-        this.report(tag, failMessage);
-        return false;
+    if (
+      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
+      declaration.parent.kind !== ts.SyntaxKind.NamedImports
+    ) {
+      this.report(tag, failMessage);
+      return false;
     }
     const aliased = this.checker.getAliasedSymbol(symbol);
     if (aliased.declarations === undefined) {
@@ -219,15 +247,23 @@ export class SourceFileConverter {
       return false;
     }
     const originalDeclaration = aliased.declarations[0];
-    const originalDeclarationFileName = originalDeclaration.getSourceFile().fileName;
-    if (!originalDeclarationFileName.endsWith('/node_modules/lit-html/lit-html.d.ts')) {
+    const originalDeclarationFileName = originalDeclaration.getSourceFile()
+      .fileName;
+    if (
+      !originalDeclarationFileName.endsWith(
+        '/node_modules/lit-html/lit-html.d.ts'
+      )
+    ) {
       this.report(tag, failMessage);
       return false;
     }
     return aliased.name === 'html';
   }
 
-  checkLitTemplateExpression(node: ts.TaggedTemplateExpression, f: ts.FunctionLikeDeclarationBase) {
+  checkLitTemplateExpression(
+    node: ts.TaggedTemplateExpression,
+    f: ts.FunctionLikeDeclarationBase
+  ) {
     if (!this.checkIsLitHtmlTag(node.tag)) {
       return;
     }
@@ -270,8 +306,13 @@ export class SourceFileConverter {
   checkExpression(node: ts.Expression, f: ts.FunctionLikeDeclarationBase) {
     switch (node.kind) {
       case ts.SyntaxKind.Identifier: {
-        const declaration = this.getIdentifierDeclaration(node as ts.Identifier);
-        if (declaration !== undefined && declaration.kind === ts.SyntaxKind.Parameter) {
+        const declaration = this.getIdentifierDeclaration(
+          node as ts.Identifier
+        );
+        if (
+          declaration !== undefined &&
+          declaration.kind === ts.SyntaxKind.Parameter
+        ) {
           // TODO: test this check
           if ((declaration as ts.ParameterDeclaration).parent !== f) {
             this.report(node, 'identifier references non-local parameter');
@@ -290,9 +331,16 @@ export class SourceFileConverter {
           this.report(node, 'only template functions can be called');
           return;
         }
-        const declaration = this.getIdentifierDeclaration(call.expression as ts.Identifier);
-        if (declaration !== undefined && declaration.kind === ts.SyntaxKind.VariableDeclaration) {
-          const litTemplate = litTemplateDeclarations.get(declaration as ts.VariableDeclaration);
+        const declaration = this.getIdentifierDeclaration(
+          call.expression as ts.Identifier
+        );
+        if (
+          declaration !== undefined &&
+          declaration.kind === ts.SyntaxKind.VariableDeclaration
+        ) {
+          const litTemplate = litTemplateDeclarations.get(
+            declaration as ts.VariableDeclaration
+          );
           if (litTemplate !== undefined) {
             this.out(`call .${call.expression.getText()}`);
           }
@@ -329,15 +377,18 @@ export class SourceFileConverter {
           case ts.SyntaxKind.ExclamationEqualsEqualsToken:
             this.report(operator, '!== is disallowed. Use !=');
             break;
-          }
+        }
         this.checkExpression((node as ts.BinaryExpression).right, f);
         break;
       }
-      // case ts.SyntaxKind.PrefixUnaryExpression:        
+      // case ts.SyntaxKind.PrefixUnaryExpression:
       //   // TODO
       //   break;
       case ts.SyntaxKind.PropertyAccessExpression: {
-        this.checkPropertyAccessExpression(node as ts.PropertyAccessExpression, f);
+        this.checkPropertyAccessExpression(
+          node as ts.PropertyAccessExpression,
+          f
+        );
         break;
       }
       default:
@@ -347,7 +398,10 @@ export class SourceFileConverter {
     }
   }
 
-  checkPropertyAccessExpression(node: ts.PropertyAccessExpression, f: ts.FunctionLikeDeclarationBase) {
+  checkPropertyAccessExpression(
+    node: ts.PropertyAccessExpression,
+    f: ts.FunctionLikeDeclarationBase
+  ) {
     const receiver = (node as ts.PropertyAccessExpression).expression;
     const receiverType = this.checker.getTypeAtLocation(receiver);
 
@@ -375,14 +429,14 @@ export class SourceFileConverter {
     this.checkExpression(receiver, f);
     this.out(`.${name}`);
   }
-  
+
   /**
    * Intended to return the Soy type equivalent to the TypeScript type of the
    * given node. Beause Soy has a fairly expressive type system with union
    * types, record types, and generics on list and map, we actually want to
    * traverse and convert the type AST here. For now we'll use some simple
    * assignability checks.
-   * 
+   *
    * @param node A node like a ParameterDeclaration that has a .type property.
    */
   getSoyTypeOfNode(node: ts.HasType): string | undefined {
@@ -400,7 +454,7 @@ export class SourceFileConverter {
 
   getSoyType(type: ts.Type): string | undefined {
     if (isAssignableToType(type, booleanType, this.checker)) {
-      return 'bool'
+      return 'bool';
     } else if (isAssignableToType(type, numberType, this.checker)) {
       return 'number';
     } else if (isAssignableToType(type, stringType, this.checker)) {
@@ -412,7 +466,8 @@ export class SourceFileConverter {
       if (!isObjectType) {
         throw new Error('unexpected type');
       }
-      const isReferenceType = (type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference;
+      const isReferenceType =
+        (type as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference;
       if (!isReferenceType) {
         throw new Error('unexpected type');
       }
@@ -426,9 +481,9 @@ export class SourceFileConverter {
     }
     return undefined;
   }
-  
+
   report(node: ts.Node, message: string) {
-    const { line, character } = this.sourceFile.getLineAndCharacterOfPosition(
+    const {line, character} = this.sourceFile.getLineAndCharacterOfPosition(
       node.getStart()
     );
     this.diagnostics.push({
@@ -447,7 +502,6 @@ export class SourceFileConverter {
     return this.buffer.join('').trim();
   }
 }
-
 
 export const checkProgram = (fileNames: string[]) => {
   const program = ts.createProgram(fileNames, {
