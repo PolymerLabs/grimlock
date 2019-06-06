@@ -15,6 +15,9 @@
   "license": "ISC",
   "dependencies": {
     "@types/node": "^12.0.2",
+    "@types/parse5": "^5.0.0",
+    "parse5": "^5.1.0",
+    "parse5-traverse": "^1.0.3",
     "source-map-support": "^0.5.12",
     "strip-indent": "^3.0.0",
     "ts-simple-type": "^0.3.4",

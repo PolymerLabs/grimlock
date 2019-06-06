@@ -249,6 +249,63 @@ suite('grimlock', () => {
         });
       }
 
+      test('text ternary', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+        import {html} from 'lit-html';
+
+        /**
+         * @soyCompatible
+         */
+        export const t = (yes: boolean) => html\`
+          <div>\${yes
+            ? html\`<p>yes</p>\`
+            : html\`<p>no</p>\`
+          }</div>\`;
+      `
+        );
+        assert.equal(
+          result.output,
+          soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param yes: bool}
+          
+            <div>{if $yes}<p>yes</p>{else}<p>no</p>{/if}</div>
+          {/template}
+        `
+        );
+      });
+
+      test('expression ternary', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+        import {html} from 'lit-html';
+
+        /**
+         * @soyCompatible
+         */
+        export const t = (yes: boolean) => html\`
+          <div>\${1 + (yes ? 1 : 2)}</div>\`;
+      `
+        );
+        assert.equal(
+          result.output,
+          soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param yes: bool}
+          
+            <div>{1+($yes?1:2)}</div>
+          {/template}
+        `
+        );
+      });
+
       test(`error on strict equality`, () => {
         const result = convertModule(
           'test.ts',
