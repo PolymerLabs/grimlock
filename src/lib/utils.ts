@@ -18,10 +18,9 @@ export const stripIndentTag = (trim: boolean = false) => (
   strings: TemplateStringsArray,
   ...values: any[]
 ) => {
-  const result = stripIndent(values.reduce(
-    (acc, v, i) => acc + String(v) + strings[i + 1],
-    strings[0]
-  ));
+  const result = stripIndent(
+    values.reduce((acc, v, i) => acc + String(v) + strings[i + 1], strings[0])
+  );
   return trim ? result.trim() : result;
 };
 export const soy = stripIndentTag();
