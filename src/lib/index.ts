@@ -127,36 +127,70 @@ export class SourceFileConverter {
     });
   }
 
+  /**
+   * Returns true if `node` is an identifier that references the import named
+   * `name` from a module with specifier `specifier`.
+   *
+   * @param node The node to check. It can be any node type but this will return
+   *     false for non-Itentifiers.
+   * @param name The imported symbol name.
+   * @param specifier. Either a single import specifier, or an array of
+   *     specifiers.
+   * @example
+   *
+   * ```
+   *   if (isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])) {
+   *     // node is a lit-html template
+   *   }
+   * ```
+   */
+  isImportOf(node: ts.Node, name: string, specifier: string | string[]) {
+    if (!ts.isIdentifier(node)) {
+      return false;
+    }
+    const symbol = this.checker.getSymbolAtLocation(node);
+    if (symbol === undefined || symbol.declarations.length === 0) {
+      return false;
+    }
+    const declaration = symbol.declarations[0];
+    if (
+      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
+      declaration.parent.kind !== ts.SyntaxKind.NamedImports
+    ) {
+      return false;
+    }
+    const imports = declaration.parent as ts.NamedImports;
+    const importDeclaration = imports.parent.parent;
+    const importName = declaration.getText();
+    const specifierNode = importDeclaration.moduleSpecifier as ts.StringLiteral;
+    const specifierText = specifierNode.text;
+    if (Array.isArray(specifier)) {
+      for (const s of specifier) {
+        if (importName === name && specifierText === s) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      return importName === name && specifierText === specifier;
+    }
+  }
+
   getCustomElementName(node: ts.ClassDeclaration): string | undefined {
     if (node.decorators === undefined) {
       return;
     }
     for (const decorator of node.decorators) {
       if (!ts.isCallExpression(decorator.expression)) {
-        return;
+        continue;
       }
       const call = decorator.expression;
-      if (!ts.isIdentifier(call.expression)) {
-        return;
-      }
-      const ident = call.expression;
-      const symbol = this.checker.getSymbolAtLocation(ident);
-      if (symbol === undefined || symbol.declarations.length === 0) {
-        return;
-      }
-      const declaration = symbol.declarations[0];
       if (
-        declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
-        declaration.parent.kind !== ts.SyntaxKind.NamedImports
-      ) {
-        return;
-      }
-      const imports = declaration.parent as ts.NamedImports;
-      const importDeclaration = imports.parent.parent;
-      const specifier = importDeclaration.moduleSpecifier as ts.StringLiteral;
-      if (
-        declaration.getText() === 'customElement' &&
-        specifier.text === 'lit-element/lib/decorators.js'
+        this.isImportOf(
+          call.expression,
+          'customElement',
+          'lit-element/lib/decorators.js'
+        )
       ) {
         const args = call.arguments;
         if (args.length !== 1) {
@@ -193,10 +227,10 @@ export class SourceFileConverter {
       this.report(node, 'no render method found');
       return;
     }
-    this.checkRenderMethod(render, node, className);
+    this.checkRenderMethod(render, className);
   }
 
-  checkRenderMethod(node: ts.MethodDeclaration, clazz: ts.ClassDeclaration, className: string) {
+  checkRenderMethod(node: ts.MethodDeclaration, className: string) {
     this.out(soy`
       {template .${className}_shadow}
     `);
@@ -302,43 +336,15 @@ export class SourceFileConverter {
   }
 
   checkIsLitHtmlTag(tag: ts.Node) {
-    const failMessage =
+    if (this.isImportOf(tag, 'html', ['lit-html', 'lit-element'])) {
+      return true;
+    }
+    this.report(
+      tag,
       'template tags must be named imports from the modules' +
-      ' "lit-html" or "lit-element"';
-    if (!ts.isIdentifier(tag)) {
-      this.report(tag, failMessage);
-      return false;
-    }
-    const symbol = this.checker.getSymbolAtLocation(tag);
-    if (symbol === undefined || symbol.declarations.length === 0) {
-      this.report(tag, failMessage);
-      return false;
-    }
-    const declaration = symbol.declarations[0];
-    if (
-      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
-      declaration.parent.kind !== ts.SyntaxKind.NamedImports
-    ) {
-      this.report(tag, failMessage);
-      return false;
-    }
-    const aliased = this.checker.getAliasedSymbol(symbol);
-    if (aliased.declarations === undefined) {
-      this.report(tag, failMessage);
-      return false;
-    }
-    const originalDeclaration = aliased.declarations[0];
-    const originalDeclarationFileName = originalDeclaration.getSourceFile()
-      .fileName;
-    if (
-      !originalDeclarationFileName.endsWith(
-        '/node_modules/lit-html/lit-html.d.ts'
-      )
-    ) {
-      this.report(tag, failMessage);
-      return false;
-    }
-    return aliased.name === 'html';
+        ' "lit-html" or "lit-element"'
+    );
+    return false;
   }
 
   checkLitTemplateExpression(
