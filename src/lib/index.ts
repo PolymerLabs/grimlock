@@ -127,6 +127,23 @@ export class SourceFileConverter {
     });
   }
 
+  /**
+   * Returns true if `node` is an identifier that references the import named
+   * `name` from a module with specifier `specifier`.
+   *
+   * @param node The node to check. It can be any node type but this will return
+   *     false for non-Itentifiers.
+   * @param name The imported symbol name.
+   * @param specifier. Either a single import specifier, or an array of
+   *     specifiers.
+   * @example
+   *
+   * ```
+   *   if (isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])) {
+   *     // node is a lit-html template
+   *   }
+   * ```
+   */
   isImportOf(node: ts.Node, name: string, specifier: string | string[]) {
     if (!ts.isIdentifier(node)) {
       return false;
