@@ -17,6 +17,7 @@ import ts from 'typescript';
 import * as path from 'path';
 import * as fs from 'fs';
 import {stripIndentTag} from '../lib/utils.js';
+import {assert} from 'chai';
 
 const {WritableStream} = require('memory-streams');
 
@@ -114,11 +115,14 @@ export const convertModule = (fileName: string, source: string) => {
   const checker = program.getTypeChecker();
   const sourceFile = program.getSourceFile(testPath)!;
 
-  // TODO: assert 0 diagnostics for most tests
-  // const diagnostics = program.getSemanticDiagnostics(sourceFile);
-  // if (diagnostics.length > 0) {
-  //   console.log(diagnostics.map((d) => `${d.file}: ${d.messageText}`));
-  // }
+  const diagnostics = program.getSyntacticDiagnostics(sourceFile);
+  if (diagnostics.length > 0) {
+    console.error(
+      diagnostics.map((d) => `${d.file.fileName}: ${d.messageText}`)
+    );
+    assert.fail('syntax errors in test input');
+  }
+
   const converter = new SourceFileConverter(sourceFile, checker, __dirname);
   const ast = converter.convertFile();
   const writer = new WritableStream();
