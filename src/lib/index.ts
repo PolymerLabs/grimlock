@@ -14,19 +14,9 @@
 
 import ts from 'typescript';
 import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
-import {soy} from './utils.js';
 import * as path from 'path';
-import * as parse5 from 'parse5';
-
-const traverseHtml = require('parse5-traverse');
-
-const isTextNode = (
-  node: parse5.DefaultTreeNode
-): node is parse5.DefaultTreeTextNode => node.nodeName === '#text';
-
-const isElementNode = (
-  node: parse5.DefaultTreeNode
-): node is parse5.DefaultTreeElement => 'tagName' in node;
+import * as ast from './soy-ast.js';
+import {getPartTypes} from './get-part-types.js';
 
 const litTemplateDeclarations = new Map<
   ts.VariableDeclaration,
@@ -96,7 +86,6 @@ export interface Diagnostic {
 }
 
 export class SourceFileConverter {
-  buffer: string[] = [];
   diagnostics: Diagnostic[] = [];
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
@@ -126,16 +115,19 @@ export class SourceFileConverter {
     return localPath.replace(/\//g, '.');
   }
 
-  checkFile() {
-    this.out(`{namespace ${this.soyNamespace}}\n`);
+  convertFile() {
+    const commands: ast.Command[] = [
+      new ast.Namespace(this.soyNamespace)
+    ];
 
     ts.forEachChild(this.sourceFile, (node) => {
       if (isLitTemplateFunctionDeclaration(node)) {
-        this.checkLitTemplateFunctionDeclaration(node);
+        commands.push(...this.convertLitTemplateFunctionDeclaration(node));
       } else if (isLitElement(node)) {
-        this.checkLitElement(node);
+        commands.push(...this.convertLitElement(node));
       }
     });
+    return new ast.File(commands);
   }
 
   /**
@@ -219,66 +211,56 @@ export class SourceFileConverter {
     return;
   }
 
-  checkLitElement(node: ts.ClassDeclaration) {
+  convertLitElement(node: ts.ClassDeclaration): ast.Command[] {
+    const commands: ast.Command[] = [];
     if (node.name === undefined) {
       this.report(node, 'LitElement classes must be named');
-      return;
+      return commands;
     }
     const className = node.name.getText();
     const tagName = this.getCustomElementName(node);
-    this.out(soy`
-      {template .${className}}
-        {$param children: string}
-        <${tagName}>{$children}</${tagName}>
-      {/template}
-      `);
+    const wrapperTemplate = new ast.Template(className, [
+      new ast.Param('children', 'string'),
+      new ast.RawText(`<${tagName}>{$children}</${tagName}>`)
+    ]);
+    commands.push(wrapperTemplate);
+
     // get render method
     const render = getRenderMethod(node);
     if (render === undefined) {
       this.report(node, 'no render method found');
-      return;
+      return commands;
     }
-    this.checkRenderMethod(render, className);
+    const shadowTemplate = this.convertRenderMethod(render, className);
+    commands.push(shadowTemplate);
+    return commands;
   }
 
-  checkRenderMethod(node: ts.MethodDeclaration, className: string) {
-    this.out(soy`
-      {template .${className}_shadow}
-    `);
-
-    const statements = node.body!.statements;
-    if (statements.length !== 1) {
-      this.report(node.body!, 'we only support a single return statement');
-    }
-    const statement1 = statements[0];
-    if (ts.isReturnStatement(statement1)) {
-      const expression = statement1.expression;
-      if (expression!.kind !== ts.SyntaxKind.TaggedTemplateExpression) {
-        this.report(node, 'litTemplates must directly return a TemplateResult');
-      }
-      this.checkLitTemplateExpression(
-        expression as ts.TaggedTemplateExpression,
-        node
-      );
-    }
-
-    this.out(soy`
-      {/template}
-    `);
+  convertRenderMethod(node: ts.MethodDeclaration, className: string): ast.Template {
+    return new ast.Template(`${className}_shadow`, 
+        this.convertLitTemplateFunctionBody(node.body!, node));
   }
 
-  checkLitTemplateFunctionDeclaration(node: ts.VariableStatement) {
+  /**
+   * Converts a variable declaration list that's been annotated with
+   * `@soyCompatible`. Any
+   */
+  convertLitTemplateFunctionDeclaration(node: ts.VariableStatement): ast.Command[] {
+    const commands: ast.Command[] = []
     for (const declaration of node.declarationList.declarations) {
       if (
         declaration.initializer !== undefined &&
         isLitTemplateFunction(declaration.initializer)
       ) {
-        this.checkLitTemplateFunction(declaration.initializer);
+        commands.push(this.convertLitTemplateFunction(declaration.initializer, declaration.name.getText()));
       }
     }
+    return commands;
   }
 
-  checkLitTemplateFunction(node: ts.ArrowFunction) {
+  convertLitTemplateFunction(node: ts.ArrowFunction, name: string): ast.Template {
+    // Cache this function by it's declaration so we can find references to it
+    // later. TODO: is this necessary now that we're loading the std lib?
     const declaration = getVariableDeclaration(node);
     if (declaration !== undefined) {
       litTemplateDeclarations.set(declaration, node);
@@ -286,144 +268,91 @@ export class SourceFileConverter {
       this.report(node, 'no declaration found');
     }
 
-    this.out(
-      `\n{template .${(node.parent as ts.VariableDeclaration).name.getText()}}\n`
-    );
-    // TODO: check parameters
+    const commands: ast.Command[] = []
     for (const param of node.parameters) {
       const type = this.getSoyTypeOfNode(param);
       const name = param.name.getText();
       if (type === undefined) {
         this.report(param, `parameters must have a declared type`);
       }
-      this.out(`  {@param ${name}${type === undefined ? '' : `: ${type}`}}\n`);
+      commands.push(new ast.Param(name, type));
     }
-
-    // TODO: check type parameters?
-    node.typeParameters;
-
-    // check body
-    this.checkLitTemplateBody(node.body, node);
-    this.out(`\n{/template}\n`);
+    commands.push(...this.convertLitTemplateFunctionBody(node.body, node));
+    return new ast.Template(name, commands);
   }
 
-  checkLitTemplateBody(
+  convertLitTemplateFunctionBody(
     node: ts.ConciseBody,
     f: ts.FunctionLikeDeclarationBase
-  ) {
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
     if (ts.isBlock(node)) {
       let hasReturn = false;
       ts.forEachChild(node, (n) => {
-        hasReturn = hasReturn || this.checkLitTemplateStatement(n, f);
+        if (ts.isReturnStatement(n)) {
+          hasReturn = true;
+          commands.push(...this.convertReturnStatement(n, f));
+        } else {
+          this.report(n, 'unsupported statement');
+        }
       });
       if (!hasReturn) {
         this.report(node, 'litTemplates must return a TemplateResult');
       }
-      return;
+      return commands;
     }
-    if (ts.isTaggedTemplateExpression(node)) {
-      this.checkLitTemplateExpression(node, f);
-      return;
+    if (!this.isLitHtmlTemplate(node)) {
+      this.report(node, 'litTemplates must return a TemplateResult');
+      return commands;
     }
-    this.report(node, 'litTemplates must return a TemplateResult');
+    commands.push(...this.convertLitTemplateExpression(node, f));
+    return commands;
   }
 
-  checkLitTemplateStatement(
-    node: ts.Node,
+  convertReturnStatement(
+    node: ts.ReturnStatement,
     f: ts.FunctionLikeDeclarationBase
-  ): boolean {
-    if (ts.isReturnStatement(node)) {
-      if (node.expression === undefined) {
-        this.report(node, 'litTemplates must return a TemplateResult');
-        return true;
-      }
-      if (ts.isTaggedTemplateExpression(node.expression)) {
-        this.checkLitTemplateExpression(node.expression, f);
-        return true;
-      }
+  ): ast.Command[] {
+    if (node.expression === undefined || !this.isLitHtmlTemplate(node.expression)) {
+      this.report(node, 'litTemplates must return a TemplateResult');
+      return [];
     }
-    this.report(node, 'unsupported statement');
-    return false;
+    return this.convertLitTemplateExpression(node.expression, f);
   }
 
-  checkIsLitHtmlTag(tag: ts.Node) {
-    if (this.isImportOf(tag, 'html', ['lit-html', 'lit-element'])) {
-      return true;
-    }
-    this.report(
-      tag,
-      'template tags must be named imports from the modules' +
-        ' "lit-html" or "lit-element"'
-    );
-    return false;
+  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
+    return ts.isTaggedTemplateExpression(node) &&
+        this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element']);
   }
 
-  checkLitTemplateExpression(
+  convertLitTemplateExpression(
     node: ts.TaggedTemplateExpression,
     f: ts.FunctionLikeDeclarationBase
-  ) {
-    if (!this.checkIsLitHtmlTag(node.tag)) {
-      return;
-    }
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
 
     const template = node.template as ts.TemplateExpression;
     if (template.head !== undefined) {
-      const marker = '{{-lit-html-}}';
-      const markerRegex = /{{-lit-html-}}/g;
-      const strings = [
-        template.head.text,
-        ...template.templateSpans.map((s) => s.literal.text),
-      ];
-      const html = strings.join(marker);
-      const fragment = parse5.parseFragment(html);
-      let partTypes: Array<'text' | 'attribute'> = [];
-      traverseHtml(fragment, {
-        pre(node: parse5.DefaultTreeNode, _parent: parse5.Node) {
-          if (isTextNode(node)) {
-            const text = node.value;
-            const match = text.match(markerRegex);
-            if (match !== null) {
-              const exprCount = match.length;
-              for (let i = 0; i < exprCount; i++) {
-                partTypes.push('text');
-              }
-            }
-          } else if (isElementNode(node)) {
-            for (const attr of node.attrs) {
-              const match = attr.value.match(markerRegex);
-              if (match !== null) {
-                const exprCount = match.length;
-                for (let i = 0; i < exprCount; i++) {
-                  partTypes.push('attribute');
-                }
-              }
-            }
-          }
-        },
-      });
+      const partTypes = getPartTypes(node);
       if (partTypes.length !== template.templateSpans.length) {
         throw new Error(`wrong number of parts: expected: ${template.templateSpans.length} got: ${partTypes.length}`);
       }
 
-      this.out(template.head.text);
+      commands.push(new ast.RawText(template.head.text));
       for (let i = 0; i < template.templateSpans.length; i++) {
         const span = template.templateSpans[i];
         const partType = partTypes[i];
-        // TODO: turns out it's a bit wrong to open the expression here, before
-        // knowing something about how the expression is going to emit.
-        // checkExpression may emit just an expression, or it may emit a
-        // control flow command like {if}{/if}. But since expressions and
-        // commands both start with a `{`, we can cheat a little and emit the
-        // `{` here. Ultimately we probably want a separate emit phase so we
-        // can decide what to emit after parsing the expression.
-        this.out('{');
-        this.checkExpression(span.expression, f, partType === 'text');
-        this.out('}');
-        this.out(span.literal.text);
+        if (partType === 'text') {
+          commands.push(...this.convertTextExpression(span.expression, f));
+        } else {
+          commands.push(this.convertAttributeExpression(span.expression, f));
+        }
+        commands.push(new ast.RawText(span.literal.text));
       }
     } else {
-      this.out((template as any).text);
+      commands.push(new ast.RawText((template as any).text));
     }
+    return commands;
   }
 
   getIdentifierDeclaration(node: ts.Identifier) {
@@ -443,79 +372,37 @@ export class SourceFileConverter {
     return declarations[0];
   }
 
-  checkExpression(
+  /*
+   * Converts text-position expressions to commands.
+   */
+  convertTextExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase,
-    isTextPosition = false
-  ) {
-    switch (node.kind) {
-      case ts.SyntaxKind.ParenthesizedExpression:
-        this.out('(');
-        this.checkExpression((node as ts.ParenthesizedExpression).expression, f);
-        this.out(')');
-        break;
-      case ts.SyntaxKind.Identifier: {
-        const declaration = this.getIdentifierDeclaration(
-          node as ts.Identifier
-        );
-        if (
-          declaration !== undefined &&
-          declaration.kind === ts.SyntaxKind.Parameter
-        ) {
-          // TODO: test this check
-          if ((declaration as ts.ParameterDeclaration).parent !== f) {
-            this.report(node, 'identifier references non-local parameter');
-            return;
-          }
-          this.out(`$${node.getText()}`);
-        }
-        return;
+    f: ts.FunctionLikeDeclarationBase): ast.Command[] {
+    if (ts.isTaggedTemplateExpression(node)) {
+      if (this.isLitHtmlTemplate(node)) {
+        return this.convertLitTemplateExpression(node, f);
       }
-      case ts.SyntaxKind.StringLiteral:
-        this.out(node.getText());
-        break;
-      case ts.SyntaxKind.NumericLiteral:
-        this.out(node.getText());
-        break;
-      case ts.SyntaxKind.TaggedTemplateExpression:
-        if (this.checkIsLitHtmlTag((node as ts.TaggedTemplateExpression).tag)) {
-          this.checkLitTemplateExpression((node as ts.TaggedTemplateExpression), f);
-          return;
-        }
-        this.report(node, `unsuported expression: ${node.getText()}`);
-        break;
-      case ts.SyntaxKind.CallExpression: {
-        const call = node as ts.CallExpression;
-        const func = call.expression;
-        const funcSymbol = this.checker.getSymbolAtLocation(func);
-
-        if (funcSymbol === this._stringIncludesSymbol) {
-          if (!ts.isPropertyAccessExpression(func)) {
-            this.report(call, 'String#includes must be called as a method');
-            return;
-          }
-          const receiver = func.expression;
-          const args = call.arguments;
-          if (args.length !== 1) {
-            this.report(
-              call,
-              'only one argument is allowed to String#includes()'
-            );
-            return;
-          }
-          const arg = args[0];
-          this.out('strContains(');
-          this.checkExpression(receiver, f);
-          this.out(', ');
-          this.checkExpression(arg, f);
-          this.out(')');
-          return;
-        }
-
-        if (!ts.isIdentifier(call.expression)) {
-          this.report(node, 'only template functions can be called');
-          return;
-        }
+      this.report(
+        node,
+        'template tags must be named imports from the modules' +
+          ' "lit-html" or "lit-element"'
+      );
+      return [];
+    }
+    if (ts.isConditionalExpression(node)) {
+      const condition = this.convertExpression(node.condition, f);
+      const whenTrue = this.convertTextExpression(node.whenTrue, f);
+      const whenFalse = this.convertTextExpression(node.whenFalse, f);
+      return [new ast.IfCommand(condition, whenTrue, whenFalse)];
+    }
+    if (ts.isCallExpression(node)) {
+      const call = node as ts.CallExpression;
+      // if (!ts.isIdentifier(call.expression)) {
+      //   this.report(node, 'only template functions can be called');
+      //   return new ast.Empty();
+      // }
+      if (ts.isIdentifier(call.expression)) {
+        // Check to see if this is a template function call
         const declaration = this.getIdentifierDeclaration(
           call.expression as ts.Identifier
         );
@@ -527,110 +414,146 @@ export class SourceFileConverter {
             declaration as ts.VariableDeclaration
           );
           if (litTemplate !== undefined) {
-            this.out(`call .${call.expression.getText()}`);
+            return [new ast.CallCommand(call.expression.getText(), [])];
           }
         }
-        this.report(node, `unknown identifier: ${node.getText()}`);
-        return;
+      }
+    }
+    return [new ast.Print(this.convertExpression(node, f))];
+  }
+
+  /*
+   * Converts attribute-position expressions to commands.
+   */
+  convertAttributeExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase): ast.Command {
+    return new ast.Print(this.convertExpression(node, f));
+  }
+
+  isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
+    const declaration = this.getIdentifierDeclaration(node);
+    return declaration !== undefined &&
+      ts.isParameter(declaration) &&
+      declaration.parent === f;
+  }
+
+  /**
+   * Converts inner expressions to Soy expressions.
+   */
+  convertExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase): ast.Expression {
+  
+    switch (node.kind) {
+      case ts.SyntaxKind.ParenthesizedExpression:
+        return new ast.Paren(this.convertExpression((node as ts.ParenthesizedExpression).expression, f));
+      case ts.SyntaxKind.Identifier:
+        if (this.isParameterOf(node as ts.Identifier, f)) {
+          return new ast.Identifier(node.getText());
+        }
+        this.report(node, 'identifier references non-local parameter');
+        break;
+      case ts.SyntaxKind.StringLiteral:
+        return new ast.StringLiteral(node.getText());
+      case ts.SyntaxKind.NumericLiteral:
+        return new ast.NumberLiteral(node.getText());
+      case ts.SyntaxKind.TrueKeyword:
+      case ts.SyntaxKind.FalseKeyword:
+        return new ast.BooleanLiteral(node.getText());
+      case ts.SyntaxKind.NullKeyword:
+      case ts.SyntaxKind.UndefinedKeyword:
+        return new ast.NullLiteral();
+      case ts.SyntaxKind.TaggedTemplateExpression:
+        this.report(node, 'template are not supported here');
+        break;
+      case ts.SyntaxKind.CallExpression: {
+        const call = node as ts.CallExpression;
+        const func = call.expression;
+        const funcSymbol = this.checker.getSymbolAtLocation(func);
+
+        // Rewrite String.contains.
+        // TODO: move this to a lookup
+        if (funcSymbol === this._stringIncludesSymbol) {
+          if (!ts.isPropertyAccessExpression(func)) {
+            this.report(call, 'String#includes must be called as a method');
+            return new ast.Empty();
+          }
+          const receiver = func.expression;
+          const args = call.arguments;
+          if (args.length !== 1) {
+            this.report(
+              call,
+              'only one argument is allowed to String#includes()'
+            );
+            return new ast.Empty();
+          }
+          const arg = args[0];
+          return new ast.CallExpression('strContains', [
+            this.convertExpression(receiver, f),
+            this.convertExpression(arg, f)]);
+        }
+        this.report(node, `unsupported call`);
+        return new ast.Empty();
       }
       case ts.SyntaxKind.BinaryExpression: {
         const operator = (node as ts.BinaryExpression).operatorToken;
-        this.checkExpression((node as ts.BinaryExpression).left, f);
-        switch (operator.kind) {
-          case ts.SyntaxKind.AmpersandAmpersandToken:
-            this.out(' and ');
-            break;
-          case ts.SyntaxKind.BarBarToken:
-            this.out(' or ');
-            break;
-          case ts.SyntaxKind.PlusToken:
-          case ts.SyntaxKind.MinusToken:
-          case ts.SyntaxKind.AsteriskToken:
-          case ts.SyntaxKind.SlashToken:
-          case ts.SyntaxKind.PercentToken:
-          case ts.SyntaxKind.GreaterThanToken:
-          case ts.SyntaxKind.LessThanToken:
-          case ts.SyntaxKind.GreaterThanEqualsToken:
-          case ts.SyntaxKind.LessThanEqualsToken:
-          case ts.SyntaxKind.EqualsEqualsToken:
-          case ts.SyntaxKind.ExclamationEqualsToken:
-            this.out(operator.getText());
-            break;
-          case ts.SyntaxKind.EqualsEqualsEqualsToken:
-            this.report(operator, '=== is disallowed. Use ==');
-            break;
-          case ts.SyntaxKind.ExclamationEqualsEqualsToken:
-            this.report(operator, '!== is disallowed. Use !=');
-            break;
+        const soyOperator = this.getSoyBinaryOperator(operator);
+        if (soyOperator !== undefined) {
+          const left = this.convertExpression((node as ts.BinaryExpression).left, f);
+          const right = this.convertExpression((node as ts.BinaryExpression).right, f);
+          return new ast.BinaryOperator(soyOperator, left, right);
         }
-        this.checkExpression((node as ts.BinaryExpression).right, f);
-        break;
+        return new ast.Empty();
       }
       case ts.SyntaxKind.ConditionalExpression:
-        if (isTextPosition) {
-          // there's already a leading `{` in the output
-          this.out('if ');
-          this.checkExpression((node as ts.ConditionalExpression).condition, f);
-          this.out('}');
-          this.checkExpression((node as ts.ConditionalExpression).whenTrue, f);
-          this.out('{else}');
-          this.checkExpression((node as ts.ConditionalExpression).whenFalse, f);
-          // there will be a trailing `}` in the output
-          this.out('{/if');
-        } else {
-          this.checkExpression((node as ts.ConditionalExpression).condition, f);
-          this.out('?');
-          this.checkExpression((node as ts.ConditionalExpression).whenTrue, f);
-          this.out(':');
-          this.checkExpression((node as ts.ConditionalExpression).whenFalse, f);
+        return new ast.Ternary(
+        this.convertExpression((node as ts.ConditionalExpression).condition, f),
+        this.convertExpression((node as ts.ConditionalExpression).whenTrue, f),
+        this.convertExpression((node as ts.ConditionalExpression).whenFalse, f)
+        );
+      case ts.SyntaxKind.PrefixUnaryExpression: {
+        const soyOperator = this.getSoyUnaryOperator(node as ts.PrefixUnaryExpression);
+        if (soyOperator !== undefined) {
+          return new ast.UnaryOperator(soyOperator,
+            this.convertExpression((node as ts.PrefixUnaryExpression).operand, f));
         }
-        break;
-      // case ts.SyntaxKind.PrefixUnaryExpression:
-      //   // TODO
-      //   break;
+        return new ast.Empty();
+      }
       case ts.SyntaxKind.PropertyAccessExpression: {
-        this.checkPropertyAccessExpression(
+        return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
           f
         );
-        break;
       }
-      default:
-        this.report(node, `unsuported expression: ${node.getText()}`);
-        return;
     }
+    this.report(node, `unsuported expression: ${node.getText()}`);
+    return new ast.Empty();
   }
 
-  checkPropertyAccessExpression(
+  convertPropertyAccessExpression(
     node: ts.PropertyAccessExpression,
     f: ts.FunctionLikeDeclarationBase
-  ) {
+  ): ast.Expression {
     const receiver = (node as ts.PropertyAccessExpression).expression;
     const receiverType = this.checker.getTypeAtLocation(receiver);
-
-    if (receiverType === undefined) {
-      return;
-    }
     const name = (node as ts.PropertyAccessExpression).name.getText();
 
-    if (isAssignableToType(stringType, receiverType, this.checker)) {
-      if (name === 'length') {
-        this.out('strLen(');
-        this.checkExpression(receiver, f);
-        this.out(')');
-        return;
+    if (receiverType !== undefined) {
+      if (isAssignableToType(stringType, receiverType, this.checker)) {
+        if (name === 'length') {
+          return new ast.CallExpression('strLen', [this.convertExpression(receiver, f)]);
+        }
       }
-    }
-    if (isAssignableToType(arrayType, receiverType, this.checker)) {
-      if (name === 'length') {
-        this.out('length(');
-        this.checkExpression(receiver, f);
-        this.out(')');
-        return;
+      if (isAssignableToType(arrayType, receiverType, this.checker)) {
+        if (name === 'length') {
+          return new ast.CallExpression('length', [this.convertExpression(receiver, f)]);
+        }
       }
+    } else {
+      this.report(node, 'unknown receiver type');
     }
-    this.checkExpression(receiver, f);
-    this.out(`.${name}`);
+    return new ast.PropertyAccess(this.convertExpression(receiver, f), name);
   }
 
   /**
@@ -685,6 +608,46 @@ export class SourceFileConverter {
     return undefined;
   }
 
+  getSoyBinaryOperator(operator: ts.Token<ts.BinaryOperator>): string|undefined {
+    switch (operator.kind) {
+      case ts.SyntaxKind.AmpersandAmpersandToken:
+        return 'and';
+      case ts.SyntaxKind.BarBarToken:
+        return 'or';
+      case ts.SyntaxKind.PlusToken:
+      case ts.SyntaxKind.MinusToken:
+      case ts.SyntaxKind.AsteriskToken:
+      case ts.SyntaxKind.SlashToken:
+      case ts.SyntaxKind.PercentToken:
+      case ts.SyntaxKind.GreaterThanToken:
+      case ts.SyntaxKind.LessThanToken:
+      case ts.SyntaxKind.GreaterThanEqualsToken:
+      case ts.SyntaxKind.LessThanEqualsToken:
+      case ts.SyntaxKind.EqualsEqualsToken:
+      case ts.SyntaxKind.ExclamationEqualsToken:
+        return operator.getText();
+      case ts.SyntaxKind.EqualsEqualsEqualsToken:
+        this.report(operator, '=== is disallowed. Use ==');
+        return undefined;
+      case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+        this.report(operator, '!== is disallowed. Use !=');
+        return undefined;
+    }
+    this.report(operator, 'unsupported operator');
+    return undefined;
+  }
+
+  getSoyUnaryOperator(expr: ts.PrefixUnaryExpression): string|undefined {
+    switch (expr.operator) {
+      case ts.SyntaxKind.ExclamationToken:
+        return 'not';
+      case ts.SyntaxKind.MinusToken:
+        return '-';
+    }
+    this.report(expr, 'unsupported operator');
+    return undefined;
+  }
+
   report(node: ts.Node, message: string) {
     const {line, character} = this.sourceFile.getLineAndCharacterOfPosition(
       node.getStart()
@@ -697,34 +660,4 @@ export class SourceFileConverter {
     });
   }
 
-  out(s: string) {
-    this.buffer.push(s);
-  }
-
-  get output() {
-    return this.buffer.join('').trim();
-  }
 }
-
-export const checkProgram = (fileNames: string[]) => {
-  const program = ts.createProgram(fileNames, {
-    target: ts.ScriptTarget.ES2017,
-    module: ts.ModuleKind.ESNext,
-  });
-  const checker = program.getTypeChecker();
-  for (const fileName of fileNames) {
-    const sourceFile = program.getSourceFile(fileName)!;
-    console.log(`\nINPUT: ${sourceFile.fileName}`);
-    console.log(sourceFile.getFullText());
-    const converter = new SourceFileConverter(sourceFile, checker, __dirname);
-    converter.checkFile();
-    console.log(`\nOUTPUT`);
-    console.log(converter.buffer.join(''));
-  }
-};
-
-export const main = () => {
-  const fileNames = process.argv.slice(2);
-  checkProgram(fileNames);
-};
-// main();

@@ -70,7 +70,7 @@ suite('grimlock', () => {
         assert.equal(result.diagnostics.length, 1);
         assert.include(
           result.diagnostics[0].message,
-          'template tags must be named imports'
+          'must return a TemplateResult'
         );
       });
 
@@ -150,7 +150,7 @@ suite('grimlock', () => {
           {namespace test.ts}
 
           {template .t2}
-          <div>{call .t2}</div>
+          <div>{call .t2 /}</div>
           {/template}
 
           {template .t1}
@@ -172,7 +172,7 @@ suite('grimlock', () => {
           export const t = () => html\`\${a}\`;
         `
         );
-        assert.equal(result.diagnostics.length, 1);
+        assert.isAbove(result.diagnostics.length, 0);
         assert.include(result.diagnostics[0].message, 'unknown identifier');
       });
 
@@ -212,8 +212,8 @@ suite('grimlock', () => {
         '>',
         '>=',
         '<=',
-        ['||', ' or '],
-        ['&&', ' and '],
+        ['||', 'or'],
+        ['&&', 'and'],
       ];
       for (let op of binaryOps) {
         let expected = op;
@@ -241,7 +241,7 @@ suite('grimlock', () => {
             {template .t}
               {@param a: string}
               {@param b: string}
-            {$a${expected}$b}
+            {$a ${expected} $b}
             {/template}
           `
           );
@@ -273,7 +273,13 @@ suite('grimlock', () => {
           {template .t}
             {@param yes: bool}
           
-            <div>{if $yes}<p>yes</p>{else}<p>no</p>{/if}</div>
+            <div>
+          {if $yes}
+          <p>yes</p>
+          {else}
+          <p>no</p>
+          {/if}
+          </div>
           {/template}
         `
         );
@@ -300,7 +306,7 @@ suite('grimlock', () => {
           {template .t}
             {@param yes: bool}
           
-            <div>{1+($yes?1:2)}</div>
+            <div>{1 + ($yes ? 1 : 2)}</div>
           {/template}
         `
         );

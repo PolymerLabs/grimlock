@@ -41,12 +41,12 @@ suite('grimlock', () => {
         {namespace test.ts}
         
         {template .MyElement}
-          {$param children: string}
-          <my-element>{$children}</my-element>
+          {@param children: string}
+        <my-element>{$children}</my-element>
         {/template}
         
         {template .MyElement_shadow}
-            <h1>Hello</h1>
+        <h1>Hello</h1>
         {/template}`
       );
     });
