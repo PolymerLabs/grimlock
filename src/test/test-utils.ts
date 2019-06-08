@@ -26,7 +26,7 @@ export const soy = stripIndentTag(true);
 const packageRoot = path.resolve(__dirname, '../');
 
 class TestLanguageServiceHost implements ts.LanguageServiceHost {
-  files: Map<string, {version: number, source: string}>;
+  files: Map<string, {version: number; source: string}>;
 
   constructor() {
     this.files = new Map();

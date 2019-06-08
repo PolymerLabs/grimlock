@@ -12,7 +12,7 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import { Writable } from 'stream';
+import {Writable} from 'stream';
 
 export abstract class Node {
   abstract emit(writer: Writable): void;
@@ -65,16 +65,20 @@ export class Template extends Command {
 
 export class Param extends Command {
   name: string;
-  type: string|undefined;
+  type: string | undefined;
 
-  constructor(name: string, type: string|undefined) {
+  constructor(name: string, type: string | undefined) {
     super();
     this.name = name;
     this.type = type;
   }
 
   emit(writer: Writable) {
-    writer.write(`  {@param ${this.name}${this.type === undefined ? '' : `: ${this.type}`}}\n`);
+    writer.write(
+      `  {@param ${this.name}${
+        this.type === undefined ? '' : `: ${this.type}`
+      }}\n`
+    );
   }
 }
 
@@ -146,7 +150,11 @@ export class IfCommand extends Command {
   whenTrue: Command[];
   whenFalse: Command[];
 
-  constructor(condition: Expression, whenTrue: Command[], whenFalse: Command[]) {
+  constructor(
+    condition: Expression,
+    whenTrue: Command[],
+    whenFalse: Command[]
+  ) {
     super();
     this.condition = condition;
     this.whenTrue = whenTrue;
@@ -230,7 +238,7 @@ export class BinaryOperator extends Expression {
     this.left = left;
     this.right = right;
   }
-  
+
   emit(writer: Writable) {
     this.left.emit(writer);
     writer.write(` ${this.operator} `);
@@ -253,7 +261,6 @@ export class PropertyAccess extends Expression {
     writer.write('.');
     writer.write(this.name);
   }
-
 }
 
 export class CallExpression extends Expression {
@@ -321,7 +328,11 @@ export class Ternary {
   trueExpr: Expression;
   falseExpr: Expression;
 
-  constructor(condition: Expression, trueExpr: Expression, falseExpr: Expression) {
+  constructor(
+    condition: Expression,
+    trueExpr: Expression,
+    falseExpr: Expression
+  ) {
     this.condition = condition;
     this.trueExpr = trueExpr;
     this.falseExpr = falseExpr;
@@ -337,17 +348,17 @@ export class Ternary {
 }
 
 export class MapLiteral {
-  entries: {[key: string]: Expression | null}|null;
+  entries: {[key: string]: Expression | null} | null;
 
-  constructor(entries: {[key: string]: Expression | null}|null) {
+  constructor(entries: {[key: string]: Expression | null} | null) {
     this.entries = entries;
   }
 }
 
 export class ListLiteral {
-  items: Array<Expression>|null;
+  items: Array<Expression> | null;
 
-  constructor(items: Array<Expression>|null) {
+  constructor(items: Array<Expression> | null) {
     this.items = items;
   }
 }

@@ -113,9 +113,7 @@ export class SourceFileConverter {
   convertFile() {
     const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
     const soyNamespace = localPath.replace(/\//g, '.');
-    const commands: ast.Command[] = [
-      new ast.Namespace(soyNamespace)
-    ];
+    const commands: ast.Command[] = [new ast.Namespace(soyNamespace)];
 
     ts.forEachChild(this.sourceFile, (node) => {
       if (isLitTemplateFunctionDeclaration(node)) {
@@ -137,7 +135,7 @@ export class SourceFileConverter {
     const tagName = this.getCustomElementName(node);
     const wrapperTemplate = new ast.Template(className, [
       new ast.Param('children', 'string'),
-      new ast.RawText(`<${tagName}>{$children}</${tagName}>`)
+      new ast.RawText(`<${tagName}>{$children}</${tagName}>`),
     ]);
     commands.push(wrapperTemplate);
 
@@ -152,29 +150,44 @@ export class SourceFileConverter {
     return commands;
   }
 
-  convertRenderMethod(node: ts.MethodDeclaration, className: string): ast.Template {
-    return new ast.Template(`${className}_shadow`, 
-        this.convertLitTemplateFunctionBody(node.body!, node));
+  convertRenderMethod(
+    node: ts.MethodDeclaration,
+    className: string
+  ): ast.Template {
+    return new ast.Template(
+      `${className}_shadow`,
+      this.convertLitTemplateFunctionBody(node.body!, node)
+    );
   }
 
   /**
    * Converts a variable declaration list that's been annotated with
    * `@soyCompatible`. Any
    */
-  convertLitTemplateFunctionDeclaration(node: ts.VariableStatement): ast.Command[] {
-    const commands: ast.Command[] = []
+  convertLitTemplateFunctionDeclaration(
+    node: ts.VariableStatement
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
     for (const declaration of node.declarationList.declarations) {
       if (
         declaration.initializer !== undefined &&
         isLitTemplateFunction(declaration.initializer)
       ) {
-        commands.push(this.convertLitTemplateFunction(declaration.initializer, declaration.name.getText()));
+        commands.push(
+          this.convertLitTemplateFunction(
+            declaration.initializer,
+            declaration.name.getText()
+          )
+        );
       }
     }
     return commands;
   }
 
-  convertLitTemplateFunction(node: ts.ArrowFunction, name: string): ast.Template {
+  convertLitTemplateFunction(
+    node: ts.ArrowFunction,
+    name: string
+  ): ast.Template {
     // Cache this function by it's declaration so we can find references to it
     // later. TODO: is this necessary now that we're loading the std lib?
     const declaration = getVariableDeclaration(node);
@@ -184,7 +197,7 @@ export class SourceFileConverter {
       this.report(node, 'no declaration found');
     }
 
-    const commands: ast.Command[] = []
+    const commands: ast.Command[] = [];
     for (const param of node.parameters) {
       const type = this.getSoyTypeOfNode(param);
       const name = param.name.getText();
@@ -229,7 +242,10 @@ export class SourceFileConverter {
     node: ts.ReturnStatement,
     f: ts.FunctionLikeDeclarationBase
   ): ast.Command[] {
-    if (node.expression === undefined || !this.isLitHtmlTemplate(node.expression)) {
+    if (
+      node.expression === undefined ||
+      !this.isLitHtmlTemplate(node.expression)
+    ) {
       this.report(node, 'litTemplates must return a TemplateResult');
       return [];
     }
@@ -246,7 +262,11 @@ export class SourceFileConverter {
     if (template.head !== undefined) {
       const partTypes = getPartTypes(node);
       if (partTypes.length !== template.templateSpans.length) {
-        throw new Error(`wrong number of parts: expected: ${template.templateSpans.length} got: ${partTypes.length}`);
+        throw new Error(
+          `wrong number of parts: expected: ${
+            template.templateSpans.length
+          } got: ${partTypes.length}`
+        );
       }
 
       commands.push(new ast.RawText(template.head.text));
@@ -271,7 +291,8 @@ export class SourceFileConverter {
    */
   convertTextExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Command[] {
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command[] {
     if (ts.isTaggedTemplateExpression(node)) {
       if (this.isLitHtmlTemplate(node)) {
         return this.convertLitTemplateExpression(node, f);
@@ -321,7 +342,8 @@ export class SourceFileConverter {
    */
   convertAttributeExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Command {
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command {
     return new ast.Print(this.convertExpression(node, f));
   }
 
@@ -330,11 +352,16 @@ export class SourceFileConverter {
    */
   convertExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Expression {
-  
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Expression {
     switch (node.kind) {
       case ts.SyntaxKind.ParenthesizedExpression:
-        return new ast.Paren(this.convertExpression((node as ts.ParenthesizedExpression).expression, f));
+        return new ast.Paren(
+          this.convertExpression(
+            (node as ts.ParenthesizedExpression).expression,
+            f
+          )
+        );
       case ts.SyntaxKind.Identifier:
         if (this.isParameterOf(node as ts.Identifier, f)) {
           return new ast.Identifier(node.getText());
@@ -378,7 +405,8 @@ export class SourceFileConverter {
           const arg = args[0];
           return new ast.CallExpression('strContains', [
             this.convertExpression(receiver, f),
-            this.convertExpression(arg, f)]);
+            this.convertExpression(arg, f),
+          ]);
         }
         this.report(node, `unsupported call`);
         return new ast.Empty();
@@ -387,23 +415,45 @@ export class SourceFileConverter {
         const operator = (node as ts.BinaryExpression).operatorToken;
         const soyOperator = this.getSoyBinaryOperator(operator);
         if (soyOperator !== undefined) {
-          const left = this.convertExpression((node as ts.BinaryExpression).left, f);
-          const right = this.convertExpression((node as ts.BinaryExpression).right, f);
+          const left = this.convertExpression(
+            (node as ts.BinaryExpression).left,
+            f
+          );
+          const right = this.convertExpression(
+            (node as ts.BinaryExpression).right,
+            f
+          );
           return new ast.BinaryOperator(soyOperator, left, right);
         }
         return new ast.Empty();
       }
       case ts.SyntaxKind.ConditionalExpression:
         return new ast.Ternary(
-        this.convertExpression((node as ts.ConditionalExpression).condition, f),
-        this.convertExpression((node as ts.ConditionalExpression).whenTrue, f),
-        this.convertExpression((node as ts.ConditionalExpression).whenFalse, f)
+          this.convertExpression(
+            (node as ts.ConditionalExpression).condition,
+            f
+          ),
+          this.convertExpression(
+            (node as ts.ConditionalExpression).whenTrue,
+            f
+          ),
+          this.convertExpression(
+            (node as ts.ConditionalExpression).whenFalse,
+            f
+          )
         );
       case ts.SyntaxKind.PrefixUnaryExpression: {
-        const soyOperator = this.getSoyUnaryOperator(node as ts.PrefixUnaryExpression);
+        const soyOperator = this.getSoyUnaryOperator(
+          node as ts.PrefixUnaryExpression
+        );
         if (soyOperator !== undefined) {
-          return new ast.UnaryOperator(soyOperator,
-            this.convertExpression((node as ts.PrefixUnaryExpression).operand, f));
+          return new ast.UnaryOperator(
+            soyOperator,
+            this.convertExpression(
+              (node as ts.PrefixUnaryExpression).operand,
+              f
+            )
+          );
         }
         return new ast.Empty();
       }
@@ -429,12 +479,16 @@ export class SourceFileConverter {
     if (receiverType !== undefined) {
       if (isAssignableToType(stringType, receiverType, this.checker)) {
         if (name === 'length') {
-          return new ast.CallExpression('strLen', [this.convertExpression(receiver, f)]);
+          return new ast.CallExpression('strLen', [
+            this.convertExpression(receiver, f),
+          ]);
         }
       }
       if (isAssignableToType(arrayType, receiverType, this.checker)) {
         if (name === 'length') {
-          return new ast.CallExpression('length', [this.convertExpression(receiver, f)]);
+          return new ast.CallExpression('length', [
+            this.convertExpression(receiver, f),
+          ]);
         }
       }
     } else {
@@ -444,15 +498,19 @@ export class SourceFileConverter {
   }
 
   isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
-    return ts.isTaggedTemplateExpression(node) &&
-        this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element']);
+    return (
+      ts.isTaggedTemplateExpression(node) &&
+      this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])
+    );
   }
 
   isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
     const declaration = this.getIdentifierDeclaration(node);
-    return declaration !== undefined &&
+    return (
+      declaration !== undefined &&
       ts.isParameter(declaration) &&
-      declaration.parent === f;
+      declaration.parent === f
+    );
   }
 
   /**
@@ -573,7 +631,9 @@ export class SourceFileConverter {
     return undefined;
   }
 
-  getSoyBinaryOperator(operator: ts.Token<ts.BinaryOperator>): string|undefined {
+  getSoyBinaryOperator(
+    operator: ts.Token<ts.BinaryOperator>
+  ): string | undefined {
     switch (operator.kind) {
       case ts.SyntaxKind.AmpersandAmpersandToken:
         return 'and';
@@ -602,7 +662,7 @@ export class SourceFileConverter {
     return undefined;
   }
 
-  getSoyUnaryOperator(expr: ts.PrefixUnaryExpression): string|undefined {
+  getSoyUnaryOperator(expr: ts.PrefixUnaryExpression): string | undefined {
     switch (expr.operator) {
       case ts.SyntaxKind.ExclamationToken:
         return 'not';
@@ -656,5 +716,4 @@ export class SourceFileConverter {
       message,
     });
   }
-
 }
