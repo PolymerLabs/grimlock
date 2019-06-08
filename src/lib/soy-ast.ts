@@ -287,7 +287,9 @@ export class CallExpression extends Expression {
 }
 
 export class Empty extends Expression {
-  emit(_writer: Writable) {}
+  emit(_writer: Writable) {
+    throw new Error('Cannot emit Empty Soy nodes');
+  }
 }
 
 export class Paren extends Expression {

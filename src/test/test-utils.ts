@@ -125,12 +125,14 @@ export const convertModule = (fileName: string, source: string) => {
 
   const converter = new SourceFileConverter(sourceFile, checker, __dirname);
   const ast = converter.convertFile();
-  const writer = new WritableStream();
-  ast.emit(writer);
-  const output = writer.toString().trim();
+
   return {
     ast,
-    output,
+    get output() {
+      const writer = new WritableStream();
+      ast.emit(writer);
+      return writer.toString().trim();
+    },
     diagnostics: converter.diagnostics,
     converter,
   };
