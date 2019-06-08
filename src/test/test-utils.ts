@@ -18,78 +18,31 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {stripIndentTag} from '../lib/utils.js';
 
-const {WritableStream} = require('memory-streams')
+const {WritableStream} = require('memory-streams');
 
 export const js = stripIndentTag(true);
 export const soy = stripIndentTag(true);
 
 const packageRoot = path.resolve(__dirname, '../');
 
-export const convertModule = (fileName: string, source: string) => {
-  const testPath = path.resolve(__dirname, fileName);
-  const host = new TestHost({
-    [testPath]: source,
-  });
-  const program = ts.createProgram(
-    [testPath],
-    {
-      target: ts.ScriptTarget.ES2017,
-      module: ts.ModuleKind.ESNext,
-      experimentalDecorators: true,
-      skipDefaultLibCheck: true,
-      skipLibCheck: true,
-    },
-    host
-  );
-  const checker = program.getTypeChecker();
+class TestLanguageServiceHost implements ts.LanguageServiceHost {
+  files: Map<string, {version: number, source: string}>;
 
-  const sourceFile = program.getSourceFile(testPath)!;
-  // TODO: assert 0 diagnostics for most tests
-  // const diagnostics = program.getSemanticDiagnostics(sourceFile);
-  // if (diagnostics.length > 0) {
-  //   console.log(diagnostics.map((d) => `${d.file}: ${d.messageText}`));
-  // }
-  const converter = new SourceFileConverter(sourceFile, checker, __dirname);
-  const ast = converter.convertFile();
-  const writer = new WritableStream();
-  ast.emit(writer);
-  const output = writer.toString().trim();
-  // console.log(converter.diagnostics);
-  // console.log(output);
-  return {
-    ast,
-    output,
-    diagnostics: converter.diagnostics,
-    converter,
-  };
-};
-
-const fileCache = new Map<string, string>();
-
-class TestHost implements ts.CompilerHost {
-  files: Map<string, string>;
-
-  constructor(files: {[fileName: string]: string}) {
-    this.files = new Map(Object.entries(files));
+  constructor() {
+    this.files = new Map();
   }
 
-  resolveModuleNames(
-    moduleNames: string[],
-    containingFile: string
-  ): (ts.ResolvedModule | undefined)[] {
-    const resolvedModules = moduleNames.map(
-      (moduleName) =>
-        ts.resolveModuleName(
-          moduleName,
-          containingFile,
-          {},
-          {
-            fileExists: (n) => this.fileExists(n),
-            readFile: (n) => this.readFile(n),
-          }
-        ).resolvedModule
-    );
-    return resolvedModules;
+  getCompilationSettings(): ts.CompilerOptions {
+    return compilerOptions;
+  }
+
+  getScriptFileNames(): string[] {
+    return Array.from(this.files.keys());
+  }
+
+  getScriptVersion(fileName: string) {
+    const file = this.files.get(fileName);
+    return (file === undefined ? -1 : file.version).toString();
   }
 
   fileExists(fileName: string): boolean {
@@ -109,7 +62,7 @@ class TestHost implements ts.CompilerHost {
 
   readFile(fileName: string): string | undefined {
     if (this.files.has(fileName)) {
-      return this.files.get(fileName);
+      return this.files.get(fileName)!.source;
     }
     let contents = fileCache.get(fileName);
     if (contents !== undefined) {
@@ -120,44 +73,63 @@ class TestHost implements ts.CompilerHost {
     return contents;
   }
 
-  getSourceFile(
-    fileName: string,
-    _languageVersion: ts.ScriptTarget,
-    onError?: (message: string) => void,
-    _shouldCreateNewSourceFile?: boolean
-  ): ts.SourceFile | undefined {
-    if (this.fileExists(fileName)) {
-      return ts.createSourceFile(
-        fileName,
-        this.readFile(fileName)!,
-        ts.ScriptTarget.ES2017,
-        true
-      );
-    } else if (onError !== undefined) {
-      onError(`File not found ${fileName}`);
+  getScriptSnapshot(fileName: string): ts.IScriptSnapshot | undefined {
+    if (!this.fileExists(fileName)) {
+      return undefined;
     }
-    return undefined;
+    return ts.ScriptSnapshot.fromString(this.readFile(fileName)!);
+  }
+
+  getCurrentDirectory(): string {
+    return __dirname;
   }
 
   getDefaultLibFileName(options: ts.CompilerOptions): string {
     return ts.getDefaultLibFilePath(options);
   }
-
-  writeFile: ts.WriteFileCallback = undefined as any;
-
-  getCurrentDirectory(): string {
-    return '/';
-  }
-
-  getCanonicalFileName(fileName: string): string {
-    return fileName;
-  }
-
-  useCaseSensitiveFileNames(): boolean {
-    return true;
-  }
-
-  getNewLine(): string {
-    return '\n';
-  }
 }
+
+const compilerOptions = {
+  target: ts.ScriptTarget.ES2017,
+  module: ts.ModuleKind.ESNext,
+  experimentalDecorators: true,
+  skipDefaultLibCheck: true,
+  skipLibCheck: true,
+};
+
+const languageServiceHost = new TestLanguageServiceHost();
+const services = ts.createLanguageService(
+  languageServiceHost,
+  ts.createDocumentRegistry()
+);
+
+export const convertModule = (fileName: string, source: string) => {
+  const testPath = path.resolve(__dirname, fileName);
+  const existingFile = languageServiceHost.files.get(testPath);
+  const version = existingFile === undefined ? 0 : existingFile.version + 1;
+  languageServiceHost.files.clear();
+  languageServiceHost.files.set(testPath, {version, source});
+
+  const program = services.getProgram()!;
+  const checker = program.getTypeChecker();
+  const sourceFile = program.getSourceFile(testPath)!;
+
+  // TODO: assert 0 diagnostics for most tests
+  // const diagnostics = program.getSemanticDiagnostics(sourceFile);
+  // if (diagnostics.length > 0) {
+  //   console.log(diagnostics.map((d) => `${d.file}: ${d.messageText}`));
+  // }
+  const converter = new SourceFileConverter(sourceFile, checker, __dirname);
+  const ast = converter.convertFile();
+  const writer = new WritableStream();
+  ast.emit(writer);
+  const output = writer.toString().trim();
+  return {
+    ast,
+    output,
+    diagnostics: converter.diagnostics,
+    converter,
+  };
+};
+
+const fileCache = new Map<string, string>();
