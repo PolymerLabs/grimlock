@@ -110,14 +110,11 @@ export class SourceFileConverter {
     this._stringIncludesSymbol = stringSymbol.members!.get('includes' as any)!;
   }
 
-  get soyNamespace() {
-    const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
-    return localPath.replace(/\//g, '.');
-  }
-
   convertFile() {
+    const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
+    const soyNamespace = localPath.replace(/\//g, '.');
     const commands: ast.Command[] = [
-      new ast.Namespace(this.soyNamespace)
+      new ast.Namespace(soyNamespace)
     ];
 
     ts.forEachChild(this.sourceFile, (node) => {
@@ -128,87 +125,6 @@ export class SourceFileConverter {
       }
     });
     return new ast.File(commands);
-  }
-
-  /**
-   * Returns true if `node` is an identifier that references the import named
-   * `name` from a module with specifier `specifier`.
-   *
-   * @param node The node to check. It can be any node type but this will return
-   *     false for non-Itentifiers.
-   * @param name The imported symbol name.
-   * @param specifier. Either a single import specifier, or an array of
-   *     specifiers.
-   * @example
-   *
-   * ```
-   *   if (isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])) {
-   *     // node is a lit-html template
-   *   }
-   * ```
-   */
-  isImportOf(node: ts.Node, name: string, specifier: string | string[]) {
-    if (!ts.isIdentifier(node)) {
-      return false;
-    }
-    const symbol = this.checker.getSymbolAtLocation(node);
-    if (symbol === undefined || symbol.declarations.length === 0) {
-      return false;
-    }
-    const declaration = symbol.declarations[0];
-    if (
-      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
-      declaration.parent.kind !== ts.SyntaxKind.NamedImports
-    ) {
-      return false;
-    }
-    const imports = declaration.parent as ts.NamedImports;
-    const importDeclaration = imports.parent.parent;
-    const importName = declaration.getText();
-    const specifierNode = importDeclaration.moduleSpecifier as ts.StringLiteral;
-    const specifierText = specifierNode.text;
-    if (Array.isArray(specifier)) {
-      for (const s of specifier) {
-        if (importName === name && specifierText === s) {
-          return true;
-        }
-      }
-      return false;
-    } else {
-      return importName === name && specifierText === specifier;
-    }
-  }
-
-  getCustomElementName(node: ts.ClassDeclaration): string | undefined {
-    if (node.decorators === undefined) {
-      return;
-    }
-    for (const decorator of node.decorators) {
-      if (!ts.isCallExpression(decorator.expression)) {
-        continue;
-      }
-      const call = decorator.expression;
-      if (
-        this.isImportOf(
-          call.expression,
-          'customElement',
-          'lit-element/lib/decorators.js'
-        )
-      ) {
-        const args = call.arguments;
-        if (args.length !== 1) {
-          this.report(call, 'wrong number of arguments to customElement');
-          return;
-        }
-        const arg = args[0];
-        if (!ts.isStringLiteral(arg)) {
-          this.report(call, 'customElement argument must be a string literal');
-          return;
-        }
-        return arg.text;
-      }
-    }
-    return;
   }
 
   convertLitElement(node: ts.ClassDeclaration): ast.Command[] {
@@ -320,11 +236,6 @@ export class SourceFileConverter {
     return this.convertLitTemplateExpression(node.expression, f);
   }
 
-  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
-    return ts.isTaggedTemplateExpression(node) &&
-        this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element']);
-  }
-
   convertLitTemplateExpression(
     node: ts.TaggedTemplateExpression,
     f: ts.FunctionLikeDeclarationBase
@@ -353,23 +264,6 @@ export class SourceFileConverter {
       commands.push(new ast.RawText((template as any).text));
     }
     return commands;
-  }
-
-  getIdentifierDeclaration(node: ts.Identifier) {
-    const symbol = this.checker.getSymbolAtLocation(node)!;
-    if (symbol === undefined) {
-      this.report(node, `unknown identifier: ${node.getText()}`);
-      return;
-    }
-    const declarations = symbol.getDeclarations();
-    if (declarations === undefined) {
-      this.report(node, `unknown identifier: ${node.getText()}`);
-      return;
-    }
-    if (declarations.length > 1) {
-      this.report(node, 'multiple declarations');
-    }
-    return declarations[0];
   }
 
   /*
@@ -429,13 +323,6 @@ export class SourceFileConverter {
     node: ts.Expression,
     f: ts.FunctionLikeDeclarationBase): ast.Command {
     return new ast.Print(this.convertExpression(node, f));
-  }
-
-  isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
-    const declaration = this.getIdentifierDeclaration(node);
-    return declaration !== undefined &&
-      ts.isParameter(declaration) &&
-      declaration.parent === f;
   }
 
   /**
@@ -556,6 +443,84 @@ export class SourceFileConverter {
     return new ast.PropertyAccess(this.convertExpression(receiver, f), name);
   }
 
+  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
+    return ts.isTaggedTemplateExpression(node) &&
+        this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element']);
+  }
+
+  isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
+    const declaration = this.getIdentifierDeclaration(node);
+    return declaration !== undefined &&
+      ts.isParameter(declaration) &&
+      declaration.parent === f;
+  }
+
+  /**
+   * Returns true if `node` is an identifier that references the import named
+   * `name` from a module with specifier `specifier`.
+   *
+   * @param node The node to check. It can be any node type but this will return
+   *     false for non-Itentifiers.
+   * @param name The imported symbol name.
+   * @param specifier. Either a single import specifier, or an array of
+   *     specifiers.
+   * @example
+   *
+   * ```
+   *   if (isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])) {
+   *     // node is a lit-html template
+   *   }
+   * ```
+   */
+  isImportOf(node: ts.Node, name: string, specifier: string | string[]) {
+    if (!ts.isIdentifier(node)) {
+      return false;
+    }
+    const symbol = this.checker.getSymbolAtLocation(node);
+    if (symbol === undefined || symbol.declarations.length === 0) {
+      return false;
+    }
+    const declaration = symbol.declarations[0];
+    if (
+      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
+      declaration.parent.kind !== ts.SyntaxKind.NamedImports
+    ) {
+      return false;
+    }
+    const imports = declaration.parent as ts.NamedImports;
+    const importDeclaration = imports.parent.parent;
+    const importName = declaration.getText();
+    const specifierNode = importDeclaration.moduleSpecifier as ts.StringLiteral;
+    const specifierText = specifierNode.text;
+    if (Array.isArray(specifier)) {
+      for (const s of specifier) {
+        if (importName === name && specifierText === s) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      return importName === name && specifierText === specifier;
+    }
+  }
+
+  getIdentifierDeclaration(node: ts.Identifier) {
+    const symbol = this.checker.getSymbolAtLocation(node)!;
+    if (symbol === undefined) {
+      this.report(node, `unknown identifier: ${node.getText()}`);
+      return;
+    }
+    const declarations = symbol.getDeclarations();
+    if (declarations === undefined) {
+      this.report(node, `unknown identifier: ${node.getText()}`);
+      return;
+    }
+    if (declarations.length > 1) {
+      this.report(node, 'multiple declarations');
+    }
+    return declarations[0];
+  }
+
   /**
    * Intended to return the Soy type equivalent to the TypeScript type of the
    * given node. Beause Soy has a fairly expressive type system with union
@@ -646,6 +611,38 @@ export class SourceFileConverter {
     }
     this.report(expr, 'unsupported operator');
     return undefined;
+  }
+
+  getCustomElementName(node: ts.ClassDeclaration): string | undefined {
+    if (node.decorators === undefined) {
+      return;
+    }
+    for (const decorator of node.decorators) {
+      if (!ts.isCallExpression(decorator.expression)) {
+        continue;
+      }
+      const call = decorator.expression;
+      if (
+        this.isImportOf(
+          call.expression,
+          'customElement',
+          'lit-element/lib/decorators.js'
+        )
+      ) {
+        const args = call.arguments;
+        if (args.length !== 1) {
+          this.report(call, 'wrong number of arguments to customElement');
+          return;
+        }
+        const arg = args[0];
+        if (!ts.isStringLiteral(arg)) {
+          this.report(call, 'customElement argument must be a string literal');
+          return;
+        }
+        return arg.text;
+      }
+    }
+    return;
   }
 
   report(node: ts.Node, message: string) {
