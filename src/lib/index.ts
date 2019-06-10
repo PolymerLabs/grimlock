@@ -16,6 +16,17 @@ import ts from 'typescript';
 import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
 import {soy} from './utils.js';
 import * as path from 'path';
+import * as parse5 from 'parse5';
+
+const traverseHtml = require('parse5-traverse');
+
+const isTextNode = (
+  node: parse5.DefaultTreeNode
+): node is parse5.DefaultTreeTextNode => node.nodeName === '#text';
+
+const isElementNode = (
+  node: parse5.DefaultTreeNode
+): node is parse5.DefaultTreeElement => 'tagName' in node;
 
 const litTemplateDeclarations = new Map<
   ts.VariableDeclaration,
@@ -357,10 +368,56 @@ export class SourceFileConverter {
 
     const template = node.template as ts.TemplateExpression;
     if (template.head !== undefined) {
+      const marker = '{{-lit-html-}}';
+      const markerRegex = /{{-lit-html-}}/g;
+      const strings = [
+        template.head.text,
+        ...template.templateSpans.map((s) => s.literal.text),
+      ];
+      const html = strings.join(marker);
+      const fragment = parse5.parseFragment(html);
+      let partTypes: Array<'text' | 'attribute'> = [];
+      traverseHtml(fragment, {
+        pre(node: parse5.DefaultTreeNode, _parent: parse5.Node) {
+          if (isTextNode(node)) {
+            const text = node.value;
+            const match = text.match(markerRegex);
+            if (match !== null) {
+              const exprCount = match.length;
+              for (let i = 0; i < exprCount; i++) {
+                partTypes.push('text');
+              }
+            }
+          } else if (isElementNode(node)) {
+            for (const attr of node.attrs) {
+              const match = attr.value.match(markerRegex);
+              if (match !== null) {
+                const exprCount = match.length;
+                for (let i = 0; i < exprCount; i++) {
+                  partTypes.push('attribute');
+                }
+              }
+            }
+          }
+        },
+      });
+      if (partTypes.length !== template.templateSpans.length) {
+        throw new Error(`wrong number of parts: expected: ${template.templateSpans.length} got: ${partTypes.length}`);
+      }
+
       this.out(template.head.text);
-      for (const span of template.templateSpans) {
+      for (let i = 0; i < template.templateSpans.length; i++) {
+        const span = template.templateSpans[i];
+        const partType = partTypes[i];
+        // TODO: turns out it's a bit wrong to open the expression here, before
+        // knowing something about how the expression is going to emit.
+        // checkExpression may emit just an expression, or it may emit a
+        // control flow command like {if}{/if}. But since expressions and
+        // commands both start with a `{`, we can cheat a little and emit the
+        // `{` here. Ultimately we probably want a separate emit phase so we
+        // can decide what to emit after parsing the expression.
         this.out('{');
-        this.checkExpression(span.expression, f);
+        this.checkExpression(span.expression, f, partType === 'text');
         this.out('}');
         this.out(span.literal.text);
       }
@@ -386,12 +443,17 @@ export class SourceFileConverter {
     return declarations[0];
   }
 
-  // getTypeOf(node: ts.Node) {
-  //
-  // }
-
-  checkExpression(node: ts.Expression, f: ts.FunctionLikeDeclarationBase) {
+  checkExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase,
+    isTextPosition = false
+  ) {
     switch (node.kind) {
+      case ts.SyntaxKind.ParenthesizedExpression:
+        this.out('(');
+        this.checkExpression((node as ts.ParenthesizedExpression).expression, f);
+        this.out(')');
+        break;
       case ts.SyntaxKind.Identifier: {
         const declaration = this.getIdentifierDeclaration(
           node as ts.Identifier
@@ -410,7 +472,17 @@ export class SourceFileConverter {
         return;
       }
       case ts.SyntaxKind.StringLiteral:
-        this.out(node.getFullText());
+        this.out(node.getText());
+        break;
+      case ts.SyntaxKind.NumericLiteral:
+        this.out(node.getText());
+        break;
+      case ts.SyntaxKind.TaggedTemplateExpression:
+        if (this.checkIsLitHtmlTag((node as ts.TaggedTemplateExpression).tag)) {
+          this.checkLitTemplateExpression((node as ts.TaggedTemplateExpression), f);
+          return;
+        }
+        this.report(node, `unsuported expression: ${node.getText()}`);
         break;
       case ts.SyntaxKind.CallExpression: {
         const call = node as ts.CallExpression;
@@ -494,6 +566,25 @@ export class SourceFileConverter {
         this.checkExpression((node as ts.BinaryExpression).right, f);
         break;
       }
+      case ts.SyntaxKind.ConditionalExpression:
+        if (isTextPosition) {
+          // there's already a leading `{` in the output
+          this.out('if ');
+          this.checkExpression((node as ts.ConditionalExpression).condition, f);
+          this.out('}');
+          this.checkExpression((node as ts.ConditionalExpression).whenTrue, f);
+          this.out('{else}');
+          this.checkExpression((node as ts.ConditionalExpression).whenFalse, f);
+          // there will be a trailing `}` in the output
+          this.out('{/if');
+        } else {
+          this.checkExpression((node as ts.ConditionalExpression).condition, f);
+          this.out('?');
+          this.checkExpression((node as ts.ConditionalExpression).whenTrue, f);
+          this.out(':');
+          this.checkExpression((node as ts.ConditionalExpression).whenFalse, f);
+        }
+        break;
       // case ts.SyntaxKind.PrefixUnaryExpression:
       //   // TODO
       //   break;
