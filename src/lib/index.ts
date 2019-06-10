@@ -16,7 +16,18 @@ import ts from 'typescript';
 import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
 import * as path from 'path';
 import * as ast from './soy-ast.js';
-import {getPartTypes} from './get-part-types.js';
+import * as parse5 from 'parse5';
+const traverseHtml = require('parse5-traverse');
+
+const isTextNode = (
+  node: parse5.DefaultTreeNode
+): node is parse5.DefaultTreeTextNode => node.nodeName === '#text';
+
+const isElementNode = (
+  node: parse5.DefaultTreeNode
+): node is parse5.DefaultTreeElement => 'tagName' in node;
+
+export type PartType = 'text' | 'attribute';
 
 const litTemplateDeclarations = new Map<
   ts.VariableDeclaration,
@@ -95,6 +106,7 @@ export class SourceFileConverter {
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
   rootDir: string;
+  definedElements: Map<string, string>;
 
   _stringIncludesSymbol: ts.Symbol;
   _arrayMapSymbol: ts.Symbol;
@@ -102,11 +114,13 @@ export class SourceFileConverter {
   constructor(
     sourceFile: ts.SourceFile,
     checker: ts.TypeChecker,
-    rootDir: string
+    rootDir: string,
+    definedElements?: Map<string, string>
   ) {
     this.sourceFile = sourceFile;
     this.checker = checker;
     this.rootDir = rootDir;
+    this.definedElements = definedElements || new Map();
 
     const symbols = this.checker.getSymbolsInScope(
       sourceFile,
@@ -145,14 +159,14 @@ export class SourceFileConverter {
     const properties = this.getLitElementProperties(node);
     const propertyParams = properties.map(
       (p) =>
-        new ast.Param(
+        new ast.TemplateParameter(
           p.name!.getText(),
           this.getSoyTypeOfNode(p as ts.PropertyDeclaration)
         )
     );
 
     const wrapperTemplate = new ast.Template(className, [
-      new ast.Param('children', 'string'),
+      new ast.TemplateParameter('children', 'string'),
       ...propertyParams,
       new ast.RawText(`<${tagName}>{$children}</${tagName}>`),
     ]);
@@ -177,7 +191,7 @@ export class SourceFileConverter {
     const properties = this.getLitElementProperties(element);
     const propertyParams = properties.map(
       (p) =>
-        new ast.Param(
+        new ast.TemplateParameter(
           p.name!.getText(),
           this.getSoyTypeOfNode(p as ts.PropertyDeclaration)
         )
@@ -241,7 +255,7 @@ export class SourceFileConverter {
       if (type === undefined) {
         this.report(param, `parameters must have a declared type`);
       }
-      commands.push(new ast.Param(name, type));
+      commands.push(new ast.TemplateParameter(name, type));
     }
     commands.push(
       ...this.convertLitTemplateFunctionBody(node.body, {functions: [node]})
@@ -306,36 +320,94 @@ export class SourceFileConverter {
     node: ts.TaggedTemplateExpression,
     scope: TemplateScope
   ): ast.Command[] {
-    const commands: ast.Command[] = [];
+    const commandStack: ast.Command[][] = [[]];
+    let commands: ast.Command[] = commandStack[0];
 
-    const template = node.template as ts.TemplateExpression;
-    if (template.head !== undefined) {
-      const partTypes = getPartTypes(node);
-      if (partTypes.length !== template.templateSpans.length) {
-        throw new Error(
-          `wrong number of parts: expected: ${
-            template.templateSpans.length
-          } got: ${partTypes.length}`
-        );
-      }
+    const template = node.template as ts.TemplateLiteral;
+    const marker = '{{-lit-html-}}';
+    const markerRegex = /{{-lit-html-}}/g;
+    const strings: string[] = ts.isNoSubstitutionTemplateLiteral(template)
+      ? [template.text]
+      : [
+          template.head.text,
+          ...template.templateSpans.map((s) => s.literal.text),
+        ];
+    const expressions = ts.isNoSubstitutionTemplateLiteral(template)
+      ? []
+      : [...template.templateSpans.map((s) => s.expression)];
+    const html = strings.join(marker);
+    const fragment = parse5.parseFragment(html, {sourceCodeLocationInfo: true});
+    let partTypes: PartType[] = [];
 
-      commands.push(new ast.RawText(template.head.text));
-      for (let i = 0; i < template.templateSpans.length; i++) {
-        const span = template.templateSpans[i];
-        const partType = partTypes[i];
-        if (partType === 'text') {
-          commands.push(...this.convertTextExpression(span.expression, scope));
-        } else {
-          commands.push(
-            this.convertAttributeExpression(span.expression, scope)
-          );
+    // commands.push(new ast.RawText(strings[0]));
+    traverseHtml(fragment, {
+      pre: (node: parse5.DefaultTreeNode, _parent: parse5.Node) => {
+        if (isTextNode(node)) {
+          const text = node.value;
+          const textLiterals = text.split(markerRegex);
+          commands.push(new ast.RawText(textLiterals[0]));
+          for (const textLiteral of textLiterals.slice(1)) {
+            commands.push(
+              ...this.convertTextExpression(
+                expressions[partTypes.length],
+                scope
+              )
+            );
+            commands.push(new ast.RawText(textLiteral));
+            partTypes.push('text');
+          }
+        } else if (isElementNode(node)) {
+          const isDefined = this.definedElements.has(node.tagName);
+          if (isDefined) {
+            const childrenCommands: ast.Command[] = [];
+            const block = new ast.Block(childrenCommands);
+            const childrenParameter = new ast.CallParameter(
+              'children',
+              block,
+              'html'
+            );
+            commands.push(
+              new ast.CallCommand(this.definedElements.get(node.tagName)!, [
+                childrenParameter,
+              ])
+            );
+            commandStack.push(commands);
+            commands = childrenCommands;
+          } else {
+            commands.push(new ast.RawText(`<${node.tagName}>`));
+          }
+          for (const attr of node.attrs) {
+            const match = attr.value.match(markerRegex);
+            if (match === null) {
+              commands.push(new ast.RawText(` ${attr.name}="${attr.value}"`));
+            } else {
+              const exprCount = match.length;
+              for (let i = 0; i < exprCount; i++) {
+                commands.push(
+                  this.convertAttributeExpression(
+                    expressions[partTypes.length],
+                    scope
+                  )
+                );
+                partTypes.push('attribute');
+              }
+            }
+          }
         }
-        commands.push(new ast.RawText(span.literal.text));
-      }
-    } else {
-      commands.push(new ast.RawText((template as any).text));
-    }
-    return commands;
+      },
+      post: (node: parse5.DefaultTreeNode, _parent: parse5.Node) => {
+        if (isElementNode(node)) {
+          const isDefined = this.definedElements.has(node.tagName);
+          if (isDefined) {
+            commandStack.pop();
+            commands = commandStack[commandStack.length - 1];
+          } else {
+            commands.push(new ast.RawText(`</${node.tagName}>`));
+          }
+        }
+      },
+    });
+    return commandStack[0];
   }
 
   /*

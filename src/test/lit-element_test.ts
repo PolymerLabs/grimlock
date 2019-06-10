@@ -72,8 +72,6 @@ suite('grimlock', () => {
     }
   `
     );
-    // console.log(result.diagnostics);
-    // console.log(result.output);
     assert.equal(
       result.output,
       soy`
@@ -88,6 +86,54 @@ suite('grimlock', () => {
       {template .MyElement_shadow}
         {@param name: string}
       <h1>Hello {$name}</h1>
+      {/template}`
+    );
+  });
+
+  test('supports defined custom elements', () => {
+    const result = convertModule(
+      'test.ts',
+      js`
+    import {LitElement, html} from 'lit-element';
+    import {customElement, property} from 'lit-element/lib/decorators.js';
+
+    /**
+     * @soyCompatible
+     */
+    @customElement('my-element')
+    export class MyElement extends LitElement {
+      @property() name: string;
+
+      render() {
+        return html\`
+          <h1>Hello \${this.name}</h1>
+          <child-element><div>child content \${this.name}</div></child-element>
+        \`;
+      }
+    }
+  `,
+      {'child-element': 'ChildElement'}
+    );
+    assert.equal(
+      result.output,
+      soy`
+      {namespace test.ts}
+      
+      {template .MyElement}
+        {@param children: string}
+        {@param name: string}
+      <my-element>{$children}</my-element>
+      {/template}
+      
+      {template .MyElement_shadow}
+        {@param name: string}
+      
+            <h1>Hello {$name}</h1>
+            {call .ChildElement}
+      {param children kind="html"}<div>child content {$name}</div>
+      {/param}
+      {/call}
+          
       {/template}`
     );
   });
