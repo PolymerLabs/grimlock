@@ -85,6 +85,11 @@ export interface Diagnostic {
   message: string;
 }
 
+export interface TemplateScope {
+  functions: ts.FunctionLikeDeclarationBase[];
+  element?: ts.ClassDeclaration;
+}
+
 export class SourceFileConverter {
   diagnostics: Diagnostic[] = [];
   sourceFile: ts.SourceFile;
@@ -149,18 +154,19 @@ export class SourceFileConverter {
       this.report(node, 'no render method found');
       return commands;
     }
-    const shadowTemplate = this.convertRenderMethod(render, className);
+    const shadowTemplate = this.convertRenderMethod(render, node, className);
     commands.push(shadowTemplate);
     return commands;
   }
 
   convertRenderMethod(
     node: ts.MethodDeclaration,
+    element: ts.ClassDeclaration,
     className: string
   ): ast.Template {
     return new ast.Template(
       `${className}_shadow`,
-      this.convertLitTemplateFunctionBody(node.body!, [node])
+      this.convertLitTemplateFunctionBody(node.body!, {element, functions: [node]})
     );
   }
 
@@ -216,7 +222,9 @@ export class SourceFileConverter {
       }
       commands.push(new ast.Param(name, type));
     }
-    commands.push(...this.convertLitTemplateFunctionBody(node.body, [node]));
+    commands.push(
+      ...this.convertLitTemplateFunctionBody(node.body, {functions: [node]})
+    );
     return new ast.Template(name, commands);
   }
 
@@ -228,12 +236,12 @@ export class SourceFileConverter {
    *
    * @param node The function body to convert. May be a block or a single
    *     lit-html tagged tempate literal expression.
-   * @param functionScopes The set of function scopes to look up identifiers
+   * @param scope The set of function scopes to look up identifiers
    *     against.
    */
   convertLitTemplateFunctionBody(
     node: ts.ConciseBody,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Command[] {
     const commands: ast.Command[] = [];
     if (ts.isBlock(node)) {
@@ -241,7 +249,7 @@ export class SourceFileConverter {
       ts.forEachChild(node, (n) => {
         if (ts.isReturnStatement(n)) {
           hasReturn = true;
-          commands.push(...this.convertReturnStatement(n, functionScopes));
+          commands.push(...this.convertReturnStatement(n, scope));
         } else {
           this.report(n, 'unsupported statement');
         }
@@ -255,15 +263,13 @@ export class SourceFileConverter {
       this.report(node, 'litTemplates must return a TemplateResult');
       return commands;
     }
-    commands.push(
-      ...this.convertLitTaggedTemplateExpression(node, functionScopes)
-    );
+    commands.push(...this.convertLitTaggedTemplateExpression(node, scope));
     return commands;
   }
 
   convertReturnStatement(
     node: ts.ReturnStatement,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Command[] {
     if (
       node.expression === undefined ||
@@ -272,15 +278,12 @@ export class SourceFileConverter {
       this.report(node, 'litTemplates must return a TemplateResult');
       return [];
     }
-    return this.convertLitTaggedTemplateExpression(
-      node.expression,
-      functionScopes
-    );
+    return this.convertLitTaggedTemplateExpression(node.expression, scope);
   }
 
   convertLitTaggedTemplateExpression(
     node: ts.TaggedTemplateExpression,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Command[] {
     const commands: ast.Command[] = [];
 
@@ -300,12 +303,10 @@ export class SourceFileConverter {
         const span = template.templateSpans[i];
         const partType = partTypes[i];
         if (partType === 'text') {
-          commands.push(
-            ...this.convertTextExpression(span.expression, functionScopes)
-          );
+          commands.push(...this.convertTextExpression(span.expression, scope));
         } else {
           commands.push(
-            this.convertAttributeExpression(span.expression, functionScopes)
+            this.convertAttributeExpression(span.expression, scope)
           );
         }
         commands.push(new ast.RawText(span.literal.text));
@@ -321,11 +322,11 @@ export class SourceFileConverter {
    */
   convertTextExpression(
     node: ts.Expression,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Command[] {
     if (ts.isTaggedTemplateExpression(node)) {
       if (this.isLitHtmlTaggedTemplate(node)) {
-        return this.convertLitTaggedTemplateExpression(node, functionScopes);
+        return this.convertLitTaggedTemplateExpression(node, scope);
       }
       this.report(
         node,
@@ -335,15 +336,9 @@ export class SourceFileConverter {
       return [];
     }
     if (ts.isConditionalExpression(node)) {
-      const condition = this.convertExpression(node.condition, functionScopes);
-      const whenTrue = this.convertTextExpression(
-        node.whenTrue,
-        functionScopes
-      );
-      const whenFalse = this.convertTextExpression(
-        node.whenFalse,
-        functionScopes
-      );
+      const condition = this.convertExpression(node.condition, scope);
+      const whenTrue = this.convertTextExpression(node.whenTrue, scope);
+      const whenFalse = this.convertTextExpression(node.whenFalse, scope);
       return [new ast.IfCommand(condition, whenTrue, whenFalse)];
     }
     if (ts.isCallExpression(node)) {
@@ -372,11 +367,11 @@ export class SourceFileConverter {
           return [new ast.Empty()];
         }
         const loopId = mapper.parameters[0].name.getText();
-        const loopExpr = this.convertExpression(receiver, functionScopes);
-        const template = this.convertLitTemplateFunctionBody(mapper.body, [
-          mapper,
-          ...functionScopes,
-        ]);
+        const loopExpr = this.convertExpression(receiver, scope);
+        const template = this.convertLitTemplateFunctionBody(mapper.body, {
+          ...scope,
+          functions: [mapper, ...scope.functions],
+        });
         return [new ast.ForCommand(loopId, loopExpr, template)];
       }
 
@@ -398,7 +393,7 @@ export class SourceFileConverter {
         }
       }
     }
-    return [new ast.Print(this.convertExpression(node, functionScopes))];
+    return [new ast.Print(this.convertExpression(node, scope))];
   }
 
   /*
@@ -406,35 +401,30 @@ export class SourceFileConverter {
    */
   convertAttributeExpression(
     node: ts.Expression,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Command {
-    return new ast.Print(this.convertExpression(node, functionScopes));
+    return new ast.Print(this.convertExpression(node, scope));
   }
 
   /**
    * Converts inner expressions to Soy expressions.
    *
    * @param node The expression to convert.
-   * @param functionScopes The set of function scopes to look up identifiers
+   * @param scope The set of function scopes to look up identifiers
    *     against.
    */
-  convertExpression(
-    node: ts.Expression,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
-  ): ast.Expression {
+  convertExpression(node: ts.Expression, scope: TemplateScope): ast.Expression {
     switch (node.kind) {
       case ts.SyntaxKind.ParenthesizedExpression:
         return new ast.Paren(
           this.convertExpression(
             (node as ts.ParenthesizedExpression).expression,
-            functionScopes
+            scope
           )
         );
       case ts.SyntaxKind.Identifier:
-        for (const f of functionScopes) {
-          if (this.isParameterOf(node as ts.Identifier, f)) {
-            return new ast.Identifier(node.getText());
-          }
+        if (this.isInScope(node as ts.Identifier, scope)) {
+          return new ast.Identifier(node.getText());
         }
         this.report(node, 'identifier references non-local parameter');
         break;
@@ -478,8 +468,8 @@ export class SourceFileConverter {
           }
           const arg = args[0];
           return new ast.CallExpression('strContains', [
-            this.convertExpression(receiver, functionScopes),
-            this.convertExpression(arg, functionScopes),
+            this.convertExpression(receiver, scope),
+            this.convertExpression(arg, scope),
           ]);
         }
         this.report(node, `unsupported call`);
@@ -491,11 +481,11 @@ export class SourceFileConverter {
         if (soyOperator !== undefined) {
           const left = this.convertExpression(
             (node as ts.BinaryExpression).left,
-            functionScopes
+            scope
           );
           const right = this.convertExpression(
             (node as ts.BinaryExpression).right,
-            functionScopes
+            scope
           );
           return new ast.BinaryOperator(soyOperator, left, right);
         }
@@ -505,15 +495,15 @@ export class SourceFileConverter {
         return new ast.Ternary(
           this.convertExpression(
             (node as ts.ConditionalExpression).condition,
-            functionScopes
+            scope
           ),
           this.convertExpression(
             (node as ts.ConditionalExpression).whenTrue,
-            functionScopes
+            scope
           ),
           this.convertExpression(
             (node as ts.ConditionalExpression).whenFalse,
-            functionScopes
+            scope
           )
         );
       case ts.SyntaxKind.PrefixUnaryExpression: {
@@ -525,7 +515,7 @@ export class SourceFileConverter {
             soyOperator,
             this.convertExpression(
               (node as ts.PrefixUnaryExpression).operand,
-              functionScopes
+              scope
             )
           );
         }
@@ -534,7 +524,7 @@ export class SourceFileConverter {
       case ts.SyntaxKind.PropertyAccessExpression: {
         return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
-          functionScopes
+          scope
         );
       }
     }
@@ -544,7 +534,7 @@ export class SourceFileConverter {
 
   convertPropertyAccessExpression(
     node: ts.PropertyAccessExpression,
-    functionScopes: ts.FunctionLikeDeclarationBase[]
+    scope: TemplateScope
   ): ast.Expression {
     const receiver = (node as ts.PropertyAccessExpression).expression;
     const receiverType = this.checker.getTypeAtLocation(receiver);
@@ -554,14 +544,14 @@ export class SourceFileConverter {
       if (isAssignableToType(stringType, receiverType, this.checker)) {
         if (name === 'length') {
           return new ast.CallExpression('strLen', [
-            this.convertExpression(receiver, functionScopes),
+            this.convertExpression(receiver, scope),
           ]);
         }
       }
       if (isAssignableToType(arrayType, receiverType, this.checker)) {
         if (name === 'length') {
           return new ast.CallExpression('length', [
-            this.convertExpression(receiver, functionScopes),
+            this.convertExpression(receiver, scope),
           ]);
         }
       }
@@ -569,7 +559,7 @@ export class SourceFileConverter {
       this.report(node, 'unknown receiver type');
     }
     return new ast.PropertyAccess(
-      this.convertExpression(receiver, functionScopes),
+      this.convertExpression(receiver, scope),
       name
     );
   }
@@ -579,6 +569,26 @@ export class SourceFileConverter {
       ts.isTaggedTemplateExpression(node) &&
       this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])
     );
+  }
+
+  isInScope(node: ts.Identifier, scope: TemplateScope) {
+    for (const f of scope.functions) {
+      if (this.isParameterOf(node as ts.Identifier, f)) {
+        return true;
+      }
+    }
+    if (scope.element !== undefined) {
+      const declaration = this.getIdentifierDeclaration(node);
+      if (declaration !== undefined) {
+        console.log('checking element property', node.getText(), declaration.getText());
+        for (const member of scope.element.members) {
+          if (declaration === member) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
