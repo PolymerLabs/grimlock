@@ -408,6 +408,87 @@ suite('grimlock', () => {
         );
         assert.equal(result.diagnostics.length, 0);
       });
+
+      test('Array.map', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+            import {html} from 'lit-html';
+
+            /**
+             * @soyCompatible
+             */
+            export const t = (items: string[]) => html\`
+              <ul>
+                \${items.map((item) => html\`<li>\${item}</li>\`)}
+              </ul>
+            \`;
+          `
+        );
+        assert.equal(
+          result.output,
+          soy`
+            {namespace test.ts}
+
+            {template .t}
+              {@param items: list<string>}
+            
+              <ul>
+                
+            {for $item in $items}
+            <li>{$item}</li>
+            {/for}
+            
+              </ul>
+            
+            {/template}
+            `
+        );
+      });
+
+      test('Array.map with free variables', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+            import {html} from 'lit-html';
+
+            /**
+             * @soyCompatible
+             */
+            export const t = (items: string[], x: boolean) => html\`
+              <ul>
+                \${items.map((item) => html\`<li>\${x ? item : ''}</li>\`)}
+              </ul>
+            \`;
+          `
+        );
+        assert.equal(
+          result.output,
+          soy`
+            {namespace test.ts}
+
+            {template .t}
+              {@param items: list<string>}
+              {@param x: bool}
+            
+              <ul>
+                
+            {for $item in $items}
+            <li>
+            {if $x}
+            {$item}
+            {else}
+            {''}
+            {/if}
+            </li>
+            {/for}
+            
+              </ul>
+            
+            {/template}
+            `
+        );
+      });
     });
   });
 });

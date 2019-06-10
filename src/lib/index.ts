@@ -92,6 +92,7 @@ export class SourceFileConverter {
   rootDir: string;
 
   _stringIncludesSymbol: ts.Symbol;
+  _arrayMapSymbol: ts.Symbol;
 
   constructor(
     sourceFile: ts.SourceFile,
@@ -108,6 +109,9 @@ export class SourceFileConverter {
     );
     const stringSymbol = symbols.filter((s) => s.name === 'String')[0];
     this._stringIncludesSymbol = stringSymbol.members!.get('includes' as any)!;
+
+    const arraySymbol = symbols.filter((s) => s.name === 'Array')[0];
+    this._arrayMapSymbol = arraySymbol.members!.get('map' as any)!;
   }
 
   convertFile() {
@@ -156,7 +160,7 @@ export class SourceFileConverter {
   ): ast.Template {
     return new ast.Template(
       `${className}_shadow`,
-      this.convertLitTemplateFunctionBody(node.body!, node)
+      this.convertLitTemplateFunctionBody(node.body!, [node])
     );
   }
 
@@ -184,6 +188,12 @@ export class SourceFileConverter {
     return commands;
   }
 
+  /**
+   * Converts a top-level lit-html template function to Soy.
+   *
+   * Inline functions, such as those passed to Array#map() must be converted
+   * with with convertLitTemplateFunctionBody.
+   */
   convertLitTemplateFunction(
     node: ts.ArrowFunction,
     name: string
@@ -206,13 +216,24 @@ export class SourceFileConverter {
       }
       commands.push(new ast.Param(name, type));
     }
-    commands.push(...this.convertLitTemplateFunctionBody(node.body, node));
+    commands.push(...this.convertLitTemplateFunctionBody(node.body, [node]));
     return new ast.Template(name, commands);
   }
 
+  /**
+   * Converts a lit-html template function body, including from top-level
+   * functions, LitElement render methods, and inline arrow functions, to an
+   * array of Soy commands. This function does not return the Soy Template AST
+   * node.
+   *
+   * @param node The function body to convert. May be a block or a single
+   *     lit-html tagged tempate literal expression.
+   * @param functionScopes The set of function scopes to look up identifiers
+   *     against.
+   */
   convertLitTemplateFunctionBody(
     node: ts.ConciseBody,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Command[] {
     const commands: ast.Command[] = [];
     if (ts.isBlock(node)) {
@@ -220,7 +241,7 @@ export class SourceFileConverter {
       ts.forEachChild(node, (n) => {
         if (ts.isReturnStatement(n)) {
           hasReturn = true;
-          commands.push(...this.convertReturnStatement(n, f));
+          commands.push(...this.convertReturnStatement(n, functionScopes));
         } else {
           this.report(n, 'unsupported statement');
         }
@@ -230,31 +251,36 @@ export class SourceFileConverter {
       }
       return commands;
     }
-    if (!this.isLitHtmlTemplate(node)) {
+    if (!this.isLitHtmlTaggedTemplate(node)) {
       this.report(node, 'litTemplates must return a TemplateResult');
       return commands;
     }
-    commands.push(...this.convertLitTemplateExpression(node, f));
+    commands.push(
+      ...this.convertLitTaggedTemplateExpression(node, functionScopes)
+    );
     return commands;
   }
 
   convertReturnStatement(
     node: ts.ReturnStatement,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Command[] {
     if (
       node.expression === undefined ||
-      !this.isLitHtmlTemplate(node.expression)
+      !this.isLitHtmlTaggedTemplate(node.expression)
     ) {
       this.report(node, 'litTemplates must return a TemplateResult');
       return [];
     }
-    return this.convertLitTemplateExpression(node.expression, f);
+    return this.convertLitTaggedTemplateExpression(
+      node.expression,
+      functionScopes
+    );
   }
 
-  convertLitTemplateExpression(
+  convertLitTaggedTemplateExpression(
     node: ts.TaggedTemplateExpression,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Command[] {
     const commands: ast.Command[] = [];
 
@@ -274,9 +300,13 @@ export class SourceFileConverter {
         const span = template.templateSpans[i];
         const partType = partTypes[i];
         if (partType === 'text') {
-          commands.push(...this.convertTextExpression(span.expression, f));
+          commands.push(
+            ...this.convertTextExpression(span.expression, functionScopes)
+          );
         } else {
-          commands.push(this.convertAttributeExpression(span.expression, f));
+          commands.push(
+            this.convertAttributeExpression(span.expression, functionScopes)
+          );
         }
         commands.push(new ast.RawText(span.literal.text));
       }
@@ -291,11 +321,11 @@ export class SourceFileConverter {
    */
   convertTextExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Command[] {
     if (ts.isTaggedTemplateExpression(node)) {
-      if (this.isLitHtmlTemplate(node)) {
-        return this.convertLitTemplateExpression(node, f);
+      if (this.isLitHtmlTaggedTemplate(node)) {
+        return this.convertLitTaggedTemplateExpression(node, functionScopes);
       }
       this.report(
         node,
@@ -305,17 +335,51 @@ export class SourceFileConverter {
       return [];
     }
     if (ts.isConditionalExpression(node)) {
-      const condition = this.convertExpression(node.condition, f);
-      const whenTrue = this.convertTextExpression(node.whenTrue, f);
-      const whenFalse = this.convertTextExpression(node.whenFalse, f);
+      const condition = this.convertExpression(node.condition, functionScopes);
+      const whenTrue = this.convertTextExpression(
+        node.whenTrue,
+        functionScopes
+      );
+      const whenFalse = this.convertTextExpression(
+        node.whenFalse,
+        functionScopes
+      );
       return [new ast.IfCommand(condition, whenTrue, whenFalse)];
     }
     if (ts.isCallExpression(node)) {
       const call = node as ts.CallExpression;
-      // if (!ts.isIdentifier(call.expression)) {
-      //   this.report(node, 'only template functions can be called');
-      //   return new ast.Empty();
-      // }
+      const func = call.expression;
+      const funcSymbol = this.checker.getSymbolAtLocation(func);
+      const funcDeclaration = funcSymbol && funcSymbol.declarations[0];
+
+      if (
+        funcDeclaration &&
+        funcDeclaration === this._arrayMapSymbol.declarations[0]
+      ) {
+        if (!ts.isPropertyAccessExpression(func)) {
+          this.report(call, 'Array#map must be called as a method');
+          return [new ast.Empty()];
+        }
+        const receiver = func.expression;
+        const args = call.arguments;
+        if (args.length !== 1) {
+          this.report(call, 'only one argument is allowed to Array#map()');
+          return [new ast.Empty()];
+        }
+        const mapper = args[0];
+        if (!ts.isArrowFunction(mapper)) {
+          this.report(node, 'Array#map must be passed an arrow function');
+          return [new ast.Empty()];
+        }
+        const loopId = mapper.parameters[0].name.getText();
+        const loopExpr = this.convertExpression(receiver, functionScopes);
+        const template = this.convertLitTemplateFunctionBody(mapper.body, [
+          mapper,
+          ...functionScopes,
+        ]);
+        return [new ast.ForCommand(loopId, loopExpr, template)];
+      }
+
       if (ts.isIdentifier(call.expression)) {
         // Check to see if this is a template function call
         const declaration = this.getIdentifierDeclaration(
@@ -334,7 +398,7 @@ export class SourceFileConverter {
         }
       }
     }
-    return [new ast.Print(this.convertExpression(node, f))];
+    return [new ast.Print(this.convertExpression(node, functionScopes))];
   }
 
   /*
@@ -342,29 +406,35 @@ export class SourceFileConverter {
    */
   convertAttributeExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Command {
-    return new ast.Print(this.convertExpression(node, f));
+    return new ast.Print(this.convertExpression(node, functionScopes));
   }
 
   /**
    * Converts inner expressions to Soy expressions.
+   *
+   * @param node The expression to convert.
+   * @param functionScopes The set of function scopes to look up identifiers
+   *     against.
    */
   convertExpression(
     node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Expression {
     switch (node.kind) {
       case ts.SyntaxKind.ParenthesizedExpression:
         return new ast.Paren(
           this.convertExpression(
             (node as ts.ParenthesizedExpression).expression,
-            f
+            functionScopes
           )
         );
       case ts.SyntaxKind.Identifier:
-        if (this.isParameterOf(node as ts.Identifier, f)) {
-          return new ast.Identifier(node.getText());
+        for (const f of functionScopes) {
+          if (this.isParameterOf(node as ts.Identifier, f)) {
+            return new ast.Identifier(node.getText());
+          }
         }
         this.report(node, 'identifier references non-local parameter');
         break;
@@ -385,10 +455,14 @@ export class SourceFileConverter {
         const call = node as ts.CallExpression;
         const func = call.expression;
         const funcSymbol = this.checker.getSymbolAtLocation(func);
+        const funcDeclaration = funcSymbol && funcSymbol.declarations[0];
 
         // Rewrite String.contains.
         // TODO: move this to a lookup
-        if (funcSymbol === this._stringIncludesSymbol) {
+        if (
+          funcDeclaration &&
+          funcDeclaration === this._stringIncludesSymbol.declarations[0]
+        ) {
           if (!ts.isPropertyAccessExpression(func)) {
             this.report(call, 'String#includes must be called as a method');
             return new ast.Empty();
@@ -404,8 +478,8 @@ export class SourceFileConverter {
           }
           const arg = args[0];
           return new ast.CallExpression('strContains', [
-            this.convertExpression(receiver, f),
-            this.convertExpression(arg, f),
+            this.convertExpression(receiver, functionScopes),
+            this.convertExpression(arg, functionScopes),
           ]);
         }
         this.report(node, `unsupported call`);
@@ -417,11 +491,11 @@ export class SourceFileConverter {
         if (soyOperator !== undefined) {
           const left = this.convertExpression(
             (node as ts.BinaryExpression).left,
-            f
+            functionScopes
           );
           const right = this.convertExpression(
             (node as ts.BinaryExpression).right,
-            f
+            functionScopes
           );
           return new ast.BinaryOperator(soyOperator, left, right);
         }
@@ -431,15 +505,15 @@ export class SourceFileConverter {
         return new ast.Ternary(
           this.convertExpression(
             (node as ts.ConditionalExpression).condition,
-            f
+            functionScopes
           ),
           this.convertExpression(
             (node as ts.ConditionalExpression).whenTrue,
-            f
+            functionScopes
           ),
           this.convertExpression(
             (node as ts.ConditionalExpression).whenFalse,
-            f
+            functionScopes
           )
         );
       case ts.SyntaxKind.PrefixUnaryExpression: {
@@ -451,7 +525,7 @@ export class SourceFileConverter {
             soyOperator,
             this.convertExpression(
               (node as ts.PrefixUnaryExpression).operand,
-              f
+              functionScopes
             )
           );
         }
@@ -460,7 +534,7 @@ export class SourceFileConverter {
       case ts.SyntaxKind.PropertyAccessExpression: {
         return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
-          f
+          functionScopes
         );
       }
     }
@@ -470,7 +544,7 @@ export class SourceFileConverter {
 
   convertPropertyAccessExpression(
     node: ts.PropertyAccessExpression,
-    f: ts.FunctionLikeDeclarationBase
+    functionScopes: ts.FunctionLikeDeclarationBase[]
   ): ast.Expression {
     const receiver = (node as ts.PropertyAccessExpression).expression;
     const receiverType = this.checker.getTypeAtLocation(receiver);
@@ -480,24 +554,27 @@ export class SourceFileConverter {
       if (isAssignableToType(stringType, receiverType, this.checker)) {
         if (name === 'length') {
           return new ast.CallExpression('strLen', [
-            this.convertExpression(receiver, f),
+            this.convertExpression(receiver, functionScopes),
           ]);
         }
       }
       if (isAssignableToType(arrayType, receiverType, this.checker)) {
         if (name === 'length') {
           return new ast.CallExpression('length', [
-            this.convertExpression(receiver, f),
+            this.convertExpression(receiver, functionScopes),
           ]);
         }
       }
     } else {
       this.report(node, 'unknown receiver type');
     }
-    return new ast.PropertyAccess(this.convertExpression(receiver, f), name);
+    return new ast.PropertyAccess(
+      this.convertExpression(receiver, functionScopes),
+      name
+    );
   }
 
-  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
+  isLitHtmlTaggedTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
     return (
       ts.isTaggedTemplateExpression(node) &&
       this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])

@@ -172,6 +172,27 @@ export class IfCommand extends Command {
   }
 }
 
+export class ForCommand extends Command {
+  identifier: string;
+  expression: Expression;
+  body: Command[];
+
+  constructor(identifier: string, expression: Expression, body: Command[]) {
+    super();
+    this.identifier = identifier;
+    this.expression = expression;
+    this.body = body;
+  }
+
+  emit(writer: Writable) {
+    writer.write(`\n{for $${this.identifier} in `);
+    this.expression.emit(writer);
+    writer.write('}\n');
+    this.body.forEach((c) => c.emit(writer));
+    writer.write('\n{/for}\n');
+  }
+}
+
 export abstract class Literal extends Expression {
   text: string;
 
