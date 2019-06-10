@@ -142,8 +142,18 @@ export class SourceFileConverter {
     }
     const className = node.name.getText();
     const tagName = this.getCustomElementName(node);
+    const properties = this.getLitElementProperties(node);
+    const propertyParams = properties.map(
+      (p) =>
+        new ast.Param(
+          p.name!.getText(),
+          this.getSoyTypeOfNode(p as ts.PropertyDeclaration)
+        )
+    );
+
     const wrapperTemplate = new ast.Template(className, [
       new ast.Param('children', 'string'),
+      ...propertyParams,
       new ast.RawText(`<${tagName}>{$children}</${tagName}>`),
     ]);
     commands.push(wrapperTemplate);
@@ -164,10 +174,21 @@ export class SourceFileConverter {
     element: ts.ClassDeclaration,
     className: string
   ): ast.Template {
-    return new ast.Template(
-      `${className}_shadow`,
-      this.convertLitTemplateFunctionBody(node.body!, {element, functions: [node]})
+    const properties = this.getLitElementProperties(element);
+    const propertyParams = properties.map(
+      (p) =>
+        new ast.Param(
+          p.name!.getText(),
+          this.getSoyTypeOfNode(p as ts.PropertyDeclaration)
+        )
     );
+    return new ast.Template(`${className}_shadow`, [
+      ...propertyParams,
+      ...this.convertLitTemplateFunctionBody(node.body!, {
+        element,
+        functions: [node],
+      }),
+    ]);
   }
 
   /**
@@ -522,6 +543,26 @@ export class SourceFileConverter {
         return new ast.Empty();
       }
       case ts.SyntaxKind.PropertyAccessExpression: {
+        const receiver = (node as ts.PropertyAccessExpression).expression;
+        if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+          if (scope.element === undefined) {
+            this.report(node, 'this keyword outside of a LitElement');
+            return new ast.Empty();
+          }
+          const symbol = this.checker.getSymbolAtLocation(node);
+          if (symbol === undefined) {
+            this.report(node, 'unknown class property');
+            return new ast.Empty();
+          }
+          const declaration = symbol.declarations[0];
+          for (const member of scope.element.members) {
+            if (declaration === member) {
+              // TODO: check that it's a decorated property
+              const name = (node as ts.PropertyAccessExpression).name;
+              return new ast.Identifier(name.getText());
+            }
+          }
+        }
         return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
           scope
@@ -571,21 +612,36 @@ export class SourceFileConverter {
     );
   }
 
+  isLitElementProperty(node: ts.PropertyDeclaration) {
+    const decorators = node.decorators;
+    if (decorators === undefined) {
+      return false;
+    }
+    for (const decorator of decorators) {
+      const expr = decorator.expression;
+      if (!ts.isCallExpression(expr)) {
+        return false;
+      }
+      const receiver = expr.expression;
+      if (
+        this.isImportOf(receiver, 'property', 'lit-element/lib/decorators.js')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  getLitElementProperties(node: ts.ClassDeclaration) {
+    return node.members.filter(
+      (m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
+    );
+  }
+
   isInScope(node: ts.Identifier, scope: TemplateScope) {
     for (const f of scope.functions) {
       if (this.isParameterOf(node as ts.Identifier, f)) {
         return true;
-      }
-    }
-    if (scope.element !== undefined) {
-      const declaration = this.getIdentifierDeclaration(node);
-      if (declaration !== undefined) {
-        console.log('checking element property', node.getText(), declaration.getText());
-        for (const member of scope.element.members) {
-          if (declaration === member) {
-            return true;
-          }
-        }
       }
     }
     return false;
