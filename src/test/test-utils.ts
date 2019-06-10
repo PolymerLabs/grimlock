@@ -104,7 +104,11 @@ const services = ts.createLanguageService(
   ts.createDocumentRegistry()
 );
 
-export const convertModule = (fileName: string, source: string) => {
+export const convertModule = (
+  fileName: string,
+  source: string,
+  definedElements?: {[tagName: string]: string}
+) => {
   const testPath = path.resolve(__dirname, fileName);
   const existingFile = languageServiceHost.files.get(testPath);
   const version = existingFile === undefined ? 0 : existingFile.version + 1;
@@ -123,7 +127,14 @@ export const convertModule = (fileName: string, source: string) => {
     assert.fail('syntax errors in test input');
   }
 
-  const converter = new SourceFileConverter(sourceFile, checker, __dirname);
+  const definedElementsMap =
+    definedElements && new Map(Object.entries(definedElements));
+  const converter = new SourceFileConverter(
+    sourceFile,
+    checker,
+    __dirname,
+    definedElementsMap
+  );
   const ast = converter.convertFile();
 
   return {

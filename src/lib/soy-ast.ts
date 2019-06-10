@@ -63,7 +63,7 @@ export class Template extends Command {
   }
 }
 
-export class Param extends Command {
+export class TemplateParameter extends Command {
   name: string;
   type: string | undefined;
 
@@ -74,11 +74,8 @@ export class Param extends Command {
   }
 
   emit(writer: Writable) {
-    writer.write(
-      `  {@param ${this.name}${
-        this.type === undefined ? '' : `: ${this.type}`
-      }}\n`
-    );
+    const typeString = this.type === undefined ? '' : `: ${this.type}`;
+    writer.write(`  {@param ${this.name}${typeString}}\n`);
   }
 }
 
@@ -110,19 +107,41 @@ export class Print extends Command {
   }
 }
 
+export class Block extends Command {
+  children: Command[];
+
+  constructor(children: Command[]) {
+    super();
+    this.children = children;
+  }
+
+  emit(writer: Writable) {
+    this.children.forEach((c) => c.emit(writer));
+  }
+}
+
 export class CallParameter extends Command {
   name: string;
   value: Node;
+  kind?: string;
 
-  constructor(name: string, value: Node) {
+  constructor(name: string, value: Node, kind?: string) {
     super();
     this.name = name;
     this.value = value;
+    this.kind = kind;
   }
 
   emit(writer: Writable) {
     if (this.value instanceof Expression) {
-      writer.write(`{param ${this.name}}`);
+      writer.write(`{param ${this.name}: `);
+      this.value.emit(writer);
+      writer.write(` /}`);
+    } else {
+      const kindString = this.kind === undefined ? '' : ` kind="${this.kind}"`;
+      writer.write(`\n{param ${this.name}${kindString}}`);
+      this.value.emit(writer);
+      writer.write(`\n{/param}`);
     }
   }
 }
@@ -138,10 +157,13 @@ export class CallCommand extends Command {
   }
 
   emit(writer: Writable) {
-    const hasParameters = this.parameters.length === 0;
-    const selfClose = hasParameters ? ' /' : '';
+    const hasParameters = this.parameters.length !== 0;
+    const selfClose = hasParameters ? '' : ' /';
     writer.write(`{call .${this.templateName}${selfClose}}`);
     this.parameters.forEach((p) => p.emit(writer));
+    if (hasParameters) {
+      writer.write(`\n{/call}`);
+    }
   }
 }
 
