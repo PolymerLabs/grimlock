@@ -51,4 +51,44 @@ suite('grimlock', () => {
       );
     });
   });
+
+  test('converts properties to params', () => {
+    const result = convertModule(
+      'test.ts',
+      js`
+    import {LitElement, html} from 'lit-element';
+    import {customElement, property} from 'lit-element/lib/decorators.js';
+
+    /**
+     * @soyCompatible
+     */
+    @customElement('my-element')
+    export class MyElement extends LitElement {
+      @property() name: string;
+
+      render() {
+        return html\`<h1>Hello \${this.name}</h1>\`;
+      }
+    }
+  `
+    );
+    // console.log(result.diagnostics);
+    // console.log(result.output);
+    assert.equal(
+      result.output,
+      soy`
+      {namespace test.ts}
+      
+      {template .MyElement}
+        {@param children: string}
+        {@param name: string}
+      <my-element>{$children}</my-element>
+      {/template}
+      
+      {template .MyElement_shadow}
+        {@param name: string}
+      <h1>Hello {$name}</h1>
+      {/template}`
+    );
+  });
 });
