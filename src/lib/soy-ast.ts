@@ -329,7 +329,7 @@ export class CallExpression extends Expression {
   }
 }
 
-export class Empty extends Expression {
+export class ErrorExpression extends Expression {
   emit(_writer: Writable) {
     throw new Error('Cannot emit Empty Soy nodes');
   }
