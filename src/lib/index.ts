@@ -159,16 +159,22 @@ export class SourceFileConverter {
     const properties = this.getLitElementProperties(node);
     const propertyParams = properties.map(
       (p) =>
-        new ast.TemplateParameter(
+        new ast.TemplateParameter(p.name!.getText(), this.getSoyTypeOfNode(p))
+    );
+    const shadowCallParams = properties.map(
+      (p) =>
+        new ast.CallParameter(
           p.name!.getText(),
-          this.getSoyTypeOfNode(p as ts.PropertyDeclaration)
+          new ast.Identifier(p.name!.getText())
         )
     );
 
     const wrapperTemplate = new ast.Template(className, [
       new ast.TemplateParameter('children', 'string'),
       ...propertyParams,
-      new ast.RawText(`<${tagName}>{$children}</${tagName}>`),
+      new ast.RawText(`<${tagName}>\n{$children}\n`),
+      new ast.CallCommand(`${className}_shadow`, shadowCallParams),
+      new ast.RawText(`</${tagName}>`),
     ]);
     commands.push(wrapperTemplate);
 
@@ -707,7 +713,7 @@ export class SourceFileConverter {
   getLitElementProperties(node: ts.ClassDeclaration) {
     return node.members.filter(
       (m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
-    );
+    ) as ts.PropertyDeclaration[];
   }
 
   isInScope(node: ts.Identifier, scope: TemplateScope) {
