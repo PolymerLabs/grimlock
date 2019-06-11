@@ -560,6 +560,22 @@ export class SourceFileConverter {
       case ts.SyntaxKind.NullKeyword:
       case ts.SyntaxKind.UndefinedKeyword:
         return new ast.NullLiteral();
+      case ts.SyntaxKind.ObjectLiteralExpression: {
+        const obj = node as ts.ObjectLiteralExpression;
+        const entries: Array<[string, ast.Expression]> = obj.properties.map(
+          (p) => {
+            if (ts.isPropertyAssignment(p)) {
+              const name = p.name.getText();
+              const value = p.initializer;
+              return [name, this.convertExpression(value, scope)];
+            } else {
+              this.report(p, 'unsupported object literal member');
+              return ['', new ast.Empty()];
+            }
+          }
+        );
+        return new ast.Record(entries);
+      }
       case ts.SyntaxKind.TaggedTemplateExpression:
         this.report(node, 'template are not supported here');
         break;
