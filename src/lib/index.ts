@@ -97,7 +97,7 @@ export interface Diagnostic {
 }
 
 export interface TemplateScope {
-  functions: ts.FunctionLikeDeclarationBase[];
+  scopes: Array<ts.FunctionLikeDeclarationBase | Set<ts.Declaration>>;
   element?: ts.ClassDeclaration;
 }
 
@@ -206,7 +206,7 @@ export class SourceFileConverter {
       ...propertyParams,
       ...this.convertLitTemplateFunctionBody(node.body!, {
         element,
-        functions: [node],
+        scopes: [node],
       }),
     ]);
   }
@@ -264,7 +264,7 @@ export class SourceFileConverter {
       commands.push(new ast.TemplateParameter(name, type));
     }
     commands.push(
-      ...this.convertLitTemplateFunctionBody(node.body, {functions: [node]})
+      ...this.convertLitTemplateFunctionBody(node.body, {scopes: [node]})
     );
     return new ast.Template(name, commands);
   }
@@ -287,14 +287,37 @@ export class SourceFileConverter {
     const commands: ast.Command[] = [];
     if (ts.isBlock(node)) {
       let hasReturn = false;
-      ts.forEachChild(node, (n) => {
-        if (ts.isReturnStatement(n)) {
+      for (const statement of node.statements) {
+        if (ts.isReturnStatement(statement)) {
           hasReturn = true;
-          commands.push(...this.convertReturnStatement(n, scope));
+          commands.push(...this.convertReturnStatement(statement, scope));
+        } else if (ts.isVariableStatement(statement)) {
+          const declarationList = statement.declarationList;
+          const isConst = declarationList.flags & ts.NodeFlags.Const;
+          if (!isConst) {
+            this.report(declarationList, 'non-const variable declaration');
+            commands.push(new ast.Empty());
+            continue;
+          }
+          for (const declaration of statement.declarationList.declarations) {
+            const name = declaration.name.getText();
+            const initializer = this.convertExpression(
+              declaration.initializer!,
+              scope
+            );
+            scope = {
+              ...scope,
+              scopes: [new Set([declaration]), ...scope.scopes],
+            };
+            // TODO: validate the type
+            // const tsType = this.checker.getTypeAtLocation(declaration);
+            // const soyType = this.getSoyType(tsType);
+            commands.push(new ast.LetCommand(name, initializer));
+          }
         } else {
-          this.report(n, 'unsupported statement');
+          this.report(statement, 'unsupported statement');
         }
-      });
+      }
       if (!hasReturn) {
         this.report(node, 'litTemplates must return a TemplateResult');
       }
@@ -469,7 +492,7 @@ export class SourceFileConverter {
         const loopExpr = this.convertExpression(receiver, scope);
         const template = this.convertLitTemplateFunctionBody(mapper.body, {
           ...scope,
-          functions: [mapper, ...scope.functions],
+          scopes: [mapper, ...scope.scopes],
         });
         return [new ast.ForCommand(loopId, loopExpr, template)];
       }
@@ -717,8 +740,13 @@ export class SourceFileConverter {
   }
 
   isInScope(node: ts.Identifier, scope: TemplateScope) {
-    for (const f of scope.functions) {
-      if (this.isParameterOf(node as ts.Identifier, f)) {
+    for (const s of scope.scopes) {
+      if (s instanceof Set) {
+        const declaration = this.getIdentifierDeclaration(node);
+        if (declaration !== undefined && s.has(declaration)) {
+          return true;
+        }
+      } else if (this.isParameterOf(node as ts.Identifier, s)) {
         return true;
       }
     }
