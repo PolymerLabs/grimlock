@@ -213,7 +213,7 @@ export class SourceFileConverter {
 
   /**
    * Converts a variable declaration list that's been annotated with
-   * `@soyCompatible`. Any
+   * `@soyCompatible`.
    */
   convertLitTemplateFunctionDeclaration(
     node: ts.VariableStatement
@@ -239,7 +239,7 @@ export class SourceFileConverter {
    * Converts a top-level lit-html template function to Soy.
    *
    * Inline functions, such as those passed to Array#map() must be converted
-   * with with convertLitTemplateFunctionBody.
+   * with convertLitTemplateFunctionBody.
    */
   convertLitTemplateFunction(
     node: ts.ArrowFunction,
@@ -452,18 +452,18 @@ export class SourceFileConverter {
       ) {
         if (!ts.isPropertyAccessExpression(func)) {
           this.report(call, 'Array#map must be called as a method');
-          return [new ast.Empty()];
+          return [new ast.ErrorExpression()];
         }
         const receiver = func.expression;
         const args = call.arguments;
         if (args.length !== 1) {
           this.report(call, 'only one argument is allowed to Array#map()');
-          return [new ast.Empty()];
+          return [new ast.ErrorExpression()];
         }
         const mapper = args[0];
         if (!ts.isArrowFunction(mapper)) {
           this.report(node, 'Array#map must be passed an arrow function');
-          return [new ast.Empty()];
+          return [new ast.ErrorExpression()];
         }
         const loopId = mapper.parameters[0].name.getText();
         const loopExpr = this.convertExpression(receiver, scope);
@@ -554,7 +554,7 @@ export class SourceFileConverter {
         ) {
           if (!ts.isPropertyAccessExpression(func)) {
             this.report(call, 'String#includes must be called as a method');
-            return new ast.Empty();
+            return new ast.ErrorExpression();
           }
           const receiver = func.expression;
           const args = call.arguments;
@@ -563,7 +563,7 @@ export class SourceFileConverter {
               call,
               'only one argument is allowed to String#includes()'
             );
-            return new ast.Empty();
+            return new ast.ErrorExpression();
           }
           const arg = args[0];
           return new ast.CallExpression('strContains', [
@@ -572,7 +572,7 @@ export class SourceFileConverter {
           ]);
         }
         this.report(node, `unsupported call`);
-        return new ast.Empty();
+        return new ast.ErrorExpression();
       }
       case ts.SyntaxKind.BinaryExpression: {
         const operator = (node as ts.BinaryExpression).operatorToken;
@@ -588,7 +588,7 @@ export class SourceFileConverter {
           );
           return new ast.BinaryOperator(soyOperator, left, right);
         }
-        return new ast.Empty();
+        return new ast.ErrorExpression();
       }
       case ts.SyntaxKind.ConditionalExpression:
         return new ast.Ternary(
@@ -618,19 +618,19 @@ export class SourceFileConverter {
             )
           );
         }
-        return new ast.Empty();
+        return new ast.ErrorExpression();
       }
       case ts.SyntaxKind.PropertyAccessExpression: {
         const receiver = (node as ts.PropertyAccessExpression).expression;
         if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
           if (scope.element === undefined) {
             this.report(node, 'this keyword outside of a LitElement');
-            return new ast.Empty();
+            return new ast.ErrorExpression();
           }
           const symbol = this.checker.getSymbolAtLocation(node);
           if (symbol === undefined) {
             this.report(node, 'unknown class property');
-            return new ast.Empty();
+            return new ast.ErrorExpression();
           }
           const declaration = symbol.declarations[0];
           for (const member of scope.element.members) {
@@ -648,7 +648,7 @@ export class SourceFileConverter {
       }
     }
     this.report(node, `unsuported expression: ${node.getText()}`);
-    return new ast.Empty();
+    return new ast.ErrorExpression();
   }
 
   convertPropertyAccessExpression(
