@@ -19,7 +19,7 @@ import {convertModule, js} from './test-utils.js';
 suite('grimlock', () => {
   suite('SourceFileConverter', () => {
     test('isImportOf', () => {
-      const converter = convertModule(
+      const {converter} = convertModule(
         'test.ts',
         js`
       import {html} from 'lit-html';

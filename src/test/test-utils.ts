@@ -18,6 +18,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import {stripIndentTag} from '../lib/utils.js';
 
+const {WritableStream} = require('memory-streams')
+
 export const js = stripIndentTag(true);
 export const soy = stripIndentTag(true);
 
@@ -48,8 +50,18 @@ export const convertModule = (fileName: string, source: string) => {
   //   console.log(diagnostics.map((d) => `${d.file}: ${d.messageText}`));
   // }
   const converter = new SourceFileConverter(sourceFile, checker, __dirname);
-  converter.checkFile();
-  return converter;
+  const ast = converter.convertFile();
+  const writer = new WritableStream();
+  ast.emit(writer);
+  const output = writer.toString().trim();
+  // console.log(converter.diagnostics);
+  // console.log(output);
+  return {
+    ast,
+    output,
+    diagnostics: converter.diagnostics,
+    converter,
+  };
 };
 
 const fileCache = new Map<string, string>();
