@@ -110,15 +110,10 @@ export class SourceFileConverter {
     this._stringIncludesSymbol = stringSymbol.members!.get('includes' as any)!;
   }
 
-  get soyNamespace() {
-    const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
-    return localPath.replace(/\//g, '.');
-  }
-
   convertFile() {
-    const commands: ast.Command[] = [
-      new ast.Namespace(this.soyNamespace)
-    ];
+    const localPath = path.relative(this.rootDir, this.sourceFile.fileName);
+    const soyNamespace = localPath.replace(/\//g, '.');
+    const commands: ast.Command[] = [new ast.Namespace(soyNamespace)];
 
     ts.forEachChild(this.sourceFile, (node) => {
       if (isLitTemplateFunctionDeclaration(node)) {
@@ -128,6 +123,394 @@ export class SourceFileConverter {
       }
     });
     return new ast.File(commands);
+  }
+
+  convertLitElement(node: ts.ClassDeclaration): ast.Command[] {
+    const commands: ast.Command[] = [];
+    if (node.name === undefined) {
+      this.report(node, 'LitElement classes must be named');
+      return commands;
+    }
+    const className = node.name.getText();
+    const tagName = this.getCustomElementName(node);
+    const wrapperTemplate = new ast.Template(className, [
+      new ast.Param('children', 'string'),
+      new ast.RawText(`<${tagName}>{$children}</${tagName}>`),
+    ]);
+    commands.push(wrapperTemplate);
+
+    // get render method
+    const render = getRenderMethod(node);
+    if (render === undefined) {
+      this.report(node, 'no render method found');
+      return commands;
+    }
+    const shadowTemplate = this.convertRenderMethod(render, className);
+    commands.push(shadowTemplate);
+    return commands;
+  }
+
+  convertRenderMethod(
+    node: ts.MethodDeclaration,
+    className: string
+  ): ast.Template {
+    return new ast.Template(
+      `${className}_shadow`,
+      this.convertLitTemplateFunctionBody(node.body!, node)
+    );
+  }
+
+  /**
+   * Converts a variable declaration list that's been annotated with
+   * `@soyCompatible`. Any
+   */
+  convertLitTemplateFunctionDeclaration(
+    node: ts.VariableStatement
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
+    for (const declaration of node.declarationList.declarations) {
+      if (
+        declaration.initializer !== undefined &&
+        isLitTemplateFunction(declaration.initializer)
+      ) {
+        commands.push(
+          this.convertLitTemplateFunction(
+            declaration.initializer,
+            declaration.name.getText()
+          )
+        );
+      }
+    }
+    return commands;
+  }
+
+  convertLitTemplateFunction(
+    node: ts.ArrowFunction,
+    name: string
+  ): ast.Template {
+    // Cache this function by it's declaration so we can find references to it
+    // later. TODO: is this necessary now that we're loading the std lib?
+    const declaration = getVariableDeclaration(node);
+    if (declaration !== undefined) {
+      litTemplateDeclarations.set(declaration, node);
+    } else {
+      this.report(node, 'no declaration found');
+    }
+
+    const commands: ast.Command[] = [];
+    for (const param of node.parameters) {
+      const type = this.getSoyTypeOfNode(param);
+      const name = param.name.getText();
+      if (type === undefined) {
+        this.report(param, `parameters must have a declared type`);
+      }
+      commands.push(new ast.Param(name, type));
+    }
+    commands.push(...this.convertLitTemplateFunctionBody(node.body, node));
+    return new ast.Template(name, commands);
+  }
+
+  convertLitTemplateFunctionBody(
+    node: ts.ConciseBody,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
+    if (ts.isBlock(node)) {
+      let hasReturn = false;
+      ts.forEachChild(node, (n) => {
+        if (ts.isReturnStatement(n)) {
+          hasReturn = true;
+          commands.push(...this.convertReturnStatement(n, f));
+        } else {
+          this.report(n, 'unsupported statement');
+        }
+      });
+      if (!hasReturn) {
+        this.report(node, 'litTemplates must return a TemplateResult');
+      }
+      return commands;
+    }
+    if (!this.isLitHtmlTemplate(node)) {
+      this.report(node, 'litTemplates must return a TemplateResult');
+      return commands;
+    }
+    commands.push(...this.convertLitTemplateExpression(node, f));
+    return commands;
+  }
+
+  convertReturnStatement(
+    node: ts.ReturnStatement,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command[] {
+    if (
+      node.expression === undefined ||
+      !this.isLitHtmlTemplate(node.expression)
+    ) {
+      this.report(node, 'litTemplates must return a TemplateResult');
+      return [];
+    }
+    return this.convertLitTemplateExpression(node.expression, f);
+  }
+
+  convertLitTemplateExpression(
+    node: ts.TaggedTemplateExpression,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command[] {
+    const commands: ast.Command[] = [];
+
+    const template = node.template as ts.TemplateExpression;
+    if (template.head !== undefined) {
+      const partTypes = getPartTypes(node);
+      if (partTypes.length !== template.templateSpans.length) {
+        throw new Error(
+          `wrong number of parts: expected: ${
+            template.templateSpans.length
+          } got: ${partTypes.length}`
+        );
+      }
+
+      commands.push(new ast.RawText(template.head.text));
+      for (let i = 0; i < template.templateSpans.length; i++) {
+        const span = template.templateSpans[i];
+        const partType = partTypes[i];
+        if (partType === 'text') {
+          commands.push(...this.convertTextExpression(span.expression, f));
+        } else {
+          commands.push(this.convertAttributeExpression(span.expression, f));
+        }
+        commands.push(new ast.RawText(span.literal.text));
+      }
+    } else {
+      commands.push(new ast.RawText((template as any).text));
+    }
+    return commands;
+  }
+
+  /*
+   * Converts text-position expressions to commands.
+   */
+  convertTextExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command[] {
+    if (ts.isTaggedTemplateExpression(node)) {
+      if (this.isLitHtmlTemplate(node)) {
+        return this.convertLitTemplateExpression(node, f);
+      }
+      this.report(
+        node,
+        'template tags must be named imports from the modules' +
+          ' "lit-html" or "lit-element"'
+      );
+      return [];
+    }
+    if (ts.isConditionalExpression(node)) {
+      const condition = this.convertExpression(node.condition, f);
+      const whenTrue = this.convertTextExpression(node.whenTrue, f);
+      const whenFalse = this.convertTextExpression(node.whenFalse, f);
+      return [new ast.IfCommand(condition, whenTrue, whenFalse)];
+    }
+    if (ts.isCallExpression(node)) {
+      const call = node as ts.CallExpression;
+      // if (!ts.isIdentifier(call.expression)) {
+      //   this.report(node, 'only template functions can be called');
+      //   return new ast.Empty();
+      // }
+      if (ts.isIdentifier(call.expression)) {
+        // Check to see if this is a template function call
+        const declaration = this.getIdentifierDeclaration(
+          call.expression as ts.Identifier
+        );
+        if (
+          declaration !== undefined &&
+          declaration.kind === ts.SyntaxKind.VariableDeclaration
+        ) {
+          const litTemplate = litTemplateDeclarations.get(
+            declaration as ts.VariableDeclaration
+          );
+          if (litTemplate !== undefined) {
+            return [new ast.CallCommand(call.expression.getText(), [])];
+          }
+        }
+      }
+    }
+    return [new ast.Print(this.convertExpression(node, f))];
+  }
+
+  /*
+   * Converts attribute-position expressions to commands.
+   */
+  convertAttributeExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Command {
+    return new ast.Print(this.convertExpression(node, f));
+  }
+
+  /**
+   * Converts inner expressions to Soy expressions.
+   */
+  convertExpression(
+    node: ts.Expression,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Expression {
+    switch (node.kind) {
+      case ts.SyntaxKind.ParenthesizedExpression:
+        return new ast.Paren(
+          this.convertExpression(
+            (node as ts.ParenthesizedExpression).expression,
+            f
+          )
+        );
+      case ts.SyntaxKind.Identifier:
+        if (this.isParameterOf(node as ts.Identifier, f)) {
+          return new ast.Identifier(node.getText());
+        }
+        this.report(node, 'identifier references non-local parameter');
+        break;
+      case ts.SyntaxKind.StringLiteral:
+        return new ast.StringLiteral(node.getText());
+      case ts.SyntaxKind.NumericLiteral:
+        return new ast.NumberLiteral(node.getText());
+      case ts.SyntaxKind.TrueKeyword:
+      case ts.SyntaxKind.FalseKeyword:
+        return new ast.BooleanLiteral(node.getText());
+      case ts.SyntaxKind.NullKeyword:
+      case ts.SyntaxKind.UndefinedKeyword:
+        return new ast.NullLiteral();
+      case ts.SyntaxKind.TaggedTemplateExpression:
+        this.report(node, 'template are not supported here');
+        break;
+      case ts.SyntaxKind.CallExpression: {
+        const call = node as ts.CallExpression;
+        const func = call.expression;
+        const funcSymbol = this.checker.getSymbolAtLocation(func);
+
+        // Rewrite String.contains.
+        // TODO: move this to a lookup
+        if (funcSymbol === this._stringIncludesSymbol) {
+          if (!ts.isPropertyAccessExpression(func)) {
+            this.report(call, 'String#includes must be called as a method');
+            return new ast.Empty();
+          }
+          const receiver = func.expression;
+          const args = call.arguments;
+          if (args.length !== 1) {
+            this.report(
+              call,
+              'only one argument is allowed to String#includes()'
+            );
+            return new ast.Empty();
+          }
+          const arg = args[0];
+          return new ast.CallExpression('strContains', [
+            this.convertExpression(receiver, f),
+            this.convertExpression(arg, f),
+          ]);
+        }
+        this.report(node, `unsupported call`);
+        return new ast.Empty();
+      }
+      case ts.SyntaxKind.BinaryExpression: {
+        const operator = (node as ts.BinaryExpression).operatorToken;
+        const soyOperator = this.getSoyBinaryOperator(operator);
+        if (soyOperator !== undefined) {
+          const left = this.convertExpression(
+            (node as ts.BinaryExpression).left,
+            f
+          );
+          const right = this.convertExpression(
+            (node as ts.BinaryExpression).right,
+            f
+          );
+          return new ast.BinaryOperator(soyOperator, left, right);
+        }
+        return new ast.Empty();
+      }
+      case ts.SyntaxKind.ConditionalExpression:
+        return new ast.Ternary(
+          this.convertExpression(
+            (node as ts.ConditionalExpression).condition,
+            f
+          ),
+          this.convertExpression(
+            (node as ts.ConditionalExpression).whenTrue,
+            f
+          ),
+          this.convertExpression(
+            (node as ts.ConditionalExpression).whenFalse,
+            f
+          )
+        );
+      case ts.SyntaxKind.PrefixUnaryExpression: {
+        const soyOperator = this.getSoyUnaryOperator(
+          node as ts.PrefixUnaryExpression
+        );
+        if (soyOperator !== undefined) {
+          return new ast.UnaryOperator(
+            soyOperator,
+            this.convertExpression(
+              (node as ts.PrefixUnaryExpression).operand,
+              f
+            )
+          );
+        }
+        return new ast.Empty();
+      }
+      case ts.SyntaxKind.PropertyAccessExpression: {
+        return this.convertPropertyAccessExpression(
+          node as ts.PropertyAccessExpression,
+          f
+        );
+      }
+    }
+    this.report(node, `unsuported expression: ${node.getText()}`);
+    return new ast.Empty();
+  }
+
+  convertPropertyAccessExpression(
+    node: ts.PropertyAccessExpression,
+    f: ts.FunctionLikeDeclarationBase
+  ): ast.Expression {
+    const receiver = (node as ts.PropertyAccessExpression).expression;
+    const receiverType = this.checker.getTypeAtLocation(receiver);
+    const name = (node as ts.PropertyAccessExpression).name.getText();
+
+    if (receiverType !== undefined) {
+      if (isAssignableToType(stringType, receiverType, this.checker)) {
+        if (name === 'length') {
+          return new ast.CallExpression('strLen', [
+            this.convertExpression(receiver, f),
+          ]);
+        }
+      }
+      if (isAssignableToType(arrayType, receiverType, this.checker)) {
+        if (name === 'length') {
+          return new ast.CallExpression('length', [
+            this.convertExpression(receiver, f),
+          ]);
+        }
+      }
+    } else {
+      this.report(node, 'unknown receiver type');
+    }
+    return new ast.PropertyAccess(this.convertExpression(receiver, f), name);
+  }
+
+  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
+    return (
+      ts.isTaggedTemplateExpression(node) &&
+      this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])
+    );
+  }
+
+  isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
+    const declaration = this.getIdentifierDeclaration(node);
+    return (
+      declaration !== undefined &&
+      ts.isParameter(declaration) &&
+      declaration.parent === f
+    );
   }
 
   /**
@@ -179,182 +562,6 @@ export class SourceFileConverter {
     }
   }
 
-  getCustomElementName(node: ts.ClassDeclaration): string | undefined {
-    if (node.decorators === undefined) {
-      return;
-    }
-    for (const decorator of node.decorators) {
-      if (!ts.isCallExpression(decorator.expression)) {
-        continue;
-      }
-      const call = decorator.expression;
-      if (
-        this.isImportOf(
-          call.expression,
-          'customElement',
-          'lit-element/lib/decorators.js'
-        )
-      ) {
-        const args = call.arguments;
-        if (args.length !== 1) {
-          this.report(call, 'wrong number of arguments to customElement');
-          return;
-        }
-        const arg = args[0];
-        if (!ts.isStringLiteral(arg)) {
-          this.report(call, 'customElement argument must be a string literal');
-          return;
-        }
-        return arg.text;
-      }
-    }
-    return;
-  }
-
-  convertLitElement(node: ts.ClassDeclaration): ast.Command[] {
-    const commands: ast.Command[] = [];
-    if (node.name === undefined) {
-      this.report(node, 'LitElement classes must be named');
-      return commands;
-    }
-    const className = node.name.getText();
-    const tagName = this.getCustomElementName(node);
-    const wrapperTemplate = new ast.Template(className, [
-      new ast.Param('children', 'string'),
-      new ast.RawText(`<${tagName}>{$children}</${tagName}>`)
-    ]);
-    commands.push(wrapperTemplate);
-
-    // get render method
-    const render = getRenderMethod(node);
-    if (render === undefined) {
-      this.report(node, 'no render method found');
-      return commands;
-    }
-    const shadowTemplate = this.convertRenderMethod(render, className);
-    commands.push(shadowTemplate);
-    return commands;
-  }
-
-  convertRenderMethod(node: ts.MethodDeclaration, className: string): ast.Template {
-    return new ast.Template(`${className}_shadow`, 
-        this.convertLitTemplateFunctionBody(node.body!, node));
-  }
-
-  /**
-   * Converts a variable declaration list that's been annotated with
-   * `@soyCompatible`. Any
-   */
-  convertLitTemplateFunctionDeclaration(node: ts.VariableStatement): ast.Command[] {
-    const commands: ast.Command[] = []
-    for (const declaration of node.declarationList.declarations) {
-      if (
-        declaration.initializer !== undefined &&
-        isLitTemplateFunction(declaration.initializer)
-      ) {
-        commands.push(this.convertLitTemplateFunction(declaration.initializer, declaration.name.getText()));
-      }
-    }
-    return commands;
-  }
-
-  convertLitTemplateFunction(node: ts.ArrowFunction, name: string): ast.Template {
-    // Cache this function by it's declaration so we can find references to it
-    // later. TODO: is this necessary now that we're loading the std lib?
-    const declaration = getVariableDeclaration(node);
-    if (declaration !== undefined) {
-      litTemplateDeclarations.set(declaration, node);
-    } else {
-      this.report(node, 'no declaration found');
-    }
-
-    const commands: ast.Command[] = []
-    for (const param of node.parameters) {
-      const type = this.getSoyTypeOfNode(param);
-      const name = param.name.getText();
-      if (type === undefined) {
-        this.report(param, `parameters must have a declared type`);
-      }
-      commands.push(new ast.Param(name, type));
-    }
-    commands.push(...this.convertLitTemplateFunctionBody(node.body, node));
-    return new ast.Template(name, commands);
-  }
-
-  convertLitTemplateFunctionBody(
-    node: ts.ConciseBody,
-    f: ts.FunctionLikeDeclarationBase
-  ): ast.Command[] {
-    const commands: ast.Command[] = [];
-    if (ts.isBlock(node)) {
-      let hasReturn = false;
-      ts.forEachChild(node, (n) => {
-        if (ts.isReturnStatement(n)) {
-          hasReturn = true;
-          commands.push(...this.convertReturnStatement(n, f));
-        } else {
-          this.report(n, 'unsupported statement');
-        }
-      });
-      if (!hasReturn) {
-        this.report(node, 'litTemplates must return a TemplateResult');
-      }
-      return commands;
-    }
-    if (!this.isLitHtmlTemplate(node)) {
-      this.report(node, 'litTemplates must return a TemplateResult');
-      return commands;
-    }
-    commands.push(...this.convertLitTemplateExpression(node, f));
-    return commands;
-  }
-
-  convertReturnStatement(
-    node: ts.ReturnStatement,
-    f: ts.FunctionLikeDeclarationBase
-  ): ast.Command[] {
-    if (node.expression === undefined || !this.isLitHtmlTemplate(node.expression)) {
-      this.report(node, 'litTemplates must return a TemplateResult');
-      return [];
-    }
-    return this.convertLitTemplateExpression(node.expression, f);
-  }
-
-  isLitHtmlTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
-    return ts.isTaggedTemplateExpression(node) &&
-        this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element']);
-  }
-
-  convertLitTemplateExpression(
-    node: ts.TaggedTemplateExpression,
-    f: ts.FunctionLikeDeclarationBase
-  ): ast.Command[] {
-    const commands: ast.Command[] = [];
-
-    const template = node.template as ts.TemplateExpression;
-    if (template.head !== undefined) {
-      const partTypes = getPartTypes(node);
-      if (partTypes.length !== template.templateSpans.length) {
-        throw new Error(`wrong number of parts: expected: ${template.templateSpans.length} got: ${partTypes.length}`);
-      }
-
-      commands.push(new ast.RawText(template.head.text));
-      for (let i = 0; i < template.templateSpans.length; i++) {
-        const span = template.templateSpans[i];
-        const partType = partTypes[i];
-        if (partType === 'text') {
-          commands.push(...this.convertTextExpression(span.expression, f));
-        } else {
-          commands.push(this.convertAttributeExpression(span.expression, f));
-        }
-        commands.push(new ast.RawText(span.literal.text));
-      }
-    } else {
-      commands.push(new ast.RawText((template as any).text));
-    }
-    return commands;
-  }
-
   getIdentifierDeclaration(node: ts.Identifier) {
     const symbol = this.checker.getSymbolAtLocation(node)!;
     if (symbol === undefined) {
@@ -370,190 +577,6 @@ export class SourceFileConverter {
       this.report(node, 'multiple declarations');
     }
     return declarations[0];
-  }
-
-  /*
-   * Converts text-position expressions to commands.
-   */
-  convertTextExpression(
-    node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Command[] {
-    if (ts.isTaggedTemplateExpression(node)) {
-      if (this.isLitHtmlTemplate(node)) {
-        return this.convertLitTemplateExpression(node, f);
-      }
-      this.report(
-        node,
-        'template tags must be named imports from the modules' +
-          ' "lit-html" or "lit-element"'
-      );
-      return [];
-    }
-    if (ts.isConditionalExpression(node)) {
-      const condition = this.convertExpression(node.condition, f);
-      const whenTrue = this.convertTextExpression(node.whenTrue, f);
-      const whenFalse = this.convertTextExpression(node.whenFalse, f);
-      return [new ast.IfCommand(condition, whenTrue, whenFalse)];
-    }
-    if (ts.isCallExpression(node)) {
-      const call = node as ts.CallExpression;
-      // if (!ts.isIdentifier(call.expression)) {
-      //   this.report(node, 'only template functions can be called');
-      //   return new ast.Empty();
-      // }
-      if (ts.isIdentifier(call.expression)) {
-        // Check to see if this is a template function call
-        const declaration = this.getIdentifierDeclaration(
-          call.expression as ts.Identifier
-        );
-        if (
-          declaration !== undefined &&
-          declaration.kind === ts.SyntaxKind.VariableDeclaration
-        ) {
-          const litTemplate = litTemplateDeclarations.get(
-            declaration as ts.VariableDeclaration
-          );
-          if (litTemplate !== undefined) {
-            return [new ast.CallCommand(call.expression.getText(), [])];
-          }
-        }
-      }
-    }
-    return [new ast.Print(this.convertExpression(node, f))];
-  }
-
-  /*
-   * Converts attribute-position expressions to commands.
-   */
-  convertAttributeExpression(
-    node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Command {
-    return new ast.Print(this.convertExpression(node, f));
-  }
-
-  isParameterOf(node: ts.Identifier, f: ts.FunctionLikeDeclarationBase) {
-    const declaration = this.getIdentifierDeclaration(node);
-    return declaration !== undefined &&
-      ts.isParameter(declaration) &&
-      declaration.parent === f;
-  }
-
-  /**
-   * Converts inner expressions to Soy expressions.
-   */
-  convertExpression(
-    node: ts.Expression,
-    f: ts.FunctionLikeDeclarationBase): ast.Expression {
-  
-    switch (node.kind) {
-      case ts.SyntaxKind.ParenthesizedExpression:
-        return new ast.Paren(this.convertExpression((node as ts.ParenthesizedExpression).expression, f));
-      case ts.SyntaxKind.Identifier:
-        if (this.isParameterOf(node as ts.Identifier, f)) {
-          return new ast.Identifier(node.getText());
-        }
-        this.report(node, 'identifier references non-local parameter');
-        break;
-      case ts.SyntaxKind.StringLiteral:
-        return new ast.StringLiteral(node.getText());
-      case ts.SyntaxKind.NumericLiteral:
-        return new ast.NumberLiteral(node.getText());
-      case ts.SyntaxKind.TrueKeyword:
-      case ts.SyntaxKind.FalseKeyword:
-        return new ast.BooleanLiteral(node.getText());
-      case ts.SyntaxKind.NullKeyword:
-      case ts.SyntaxKind.UndefinedKeyword:
-        return new ast.NullLiteral();
-      case ts.SyntaxKind.TaggedTemplateExpression:
-        this.report(node, 'template are not supported here');
-        break;
-      case ts.SyntaxKind.CallExpression: {
-        const call = node as ts.CallExpression;
-        const func = call.expression;
-        const funcSymbol = this.checker.getSymbolAtLocation(func);
-
-        // Rewrite String.contains.
-        // TODO: move this to a lookup
-        if (funcSymbol === this._stringIncludesSymbol) {
-          if (!ts.isPropertyAccessExpression(func)) {
-            this.report(call, 'String#includes must be called as a method');
-            return new ast.Empty();
-          }
-          const receiver = func.expression;
-          const args = call.arguments;
-          if (args.length !== 1) {
-            this.report(
-              call,
-              'only one argument is allowed to String#includes()'
-            );
-            return new ast.Empty();
-          }
-          const arg = args[0];
-          return new ast.CallExpression('strContains', [
-            this.convertExpression(receiver, f),
-            this.convertExpression(arg, f)]);
-        }
-        this.report(node, `unsupported call`);
-        return new ast.Empty();
-      }
-      case ts.SyntaxKind.BinaryExpression: {
-        const operator = (node as ts.BinaryExpression).operatorToken;
-        const soyOperator = this.getSoyBinaryOperator(operator);
-        if (soyOperator !== undefined) {
-          const left = this.convertExpression((node as ts.BinaryExpression).left, f);
-          const right = this.convertExpression((node as ts.BinaryExpression).right, f);
-          return new ast.BinaryOperator(soyOperator, left, right);
-        }
-        return new ast.Empty();
-      }
-      case ts.SyntaxKind.ConditionalExpression:
-        return new ast.Ternary(
-        this.convertExpression((node as ts.ConditionalExpression).condition, f),
-        this.convertExpression((node as ts.ConditionalExpression).whenTrue, f),
-        this.convertExpression((node as ts.ConditionalExpression).whenFalse, f)
-        );
-      case ts.SyntaxKind.PrefixUnaryExpression: {
-        const soyOperator = this.getSoyUnaryOperator(node as ts.PrefixUnaryExpression);
-        if (soyOperator !== undefined) {
-          return new ast.UnaryOperator(soyOperator,
-            this.convertExpression((node as ts.PrefixUnaryExpression).operand, f));
-        }
-        return new ast.Empty();
-      }
-      case ts.SyntaxKind.PropertyAccessExpression: {
-        return this.convertPropertyAccessExpression(
-          node as ts.PropertyAccessExpression,
-          f
-        );
-      }
-    }
-    this.report(node, `unsuported expression: ${node.getText()}`);
-    return new ast.Empty();
-  }
-
-  convertPropertyAccessExpression(
-    node: ts.PropertyAccessExpression,
-    f: ts.FunctionLikeDeclarationBase
-  ): ast.Expression {
-    const receiver = (node as ts.PropertyAccessExpression).expression;
-    const receiverType = this.checker.getTypeAtLocation(receiver);
-    const name = (node as ts.PropertyAccessExpression).name.getText();
-
-    if (receiverType !== undefined) {
-      if (isAssignableToType(stringType, receiverType, this.checker)) {
-        if (name === 'length') {
-          return new ast.CallExpression('strLen', [this.convertExpression(receiver, f)]);
-        }
-      }
-      if (isAssignableToType(arrayType, receiverType, this.checker)) {
-        if (name === 'length') {
-          return new ast.CallExpression('length', [this.convertExpression(receiver, f)]);
-        }
-      }
-    } else {
-      this.report(node, 'unknown receiver type');
-    }
-    return new ast.PropertyAccess(this.convertExpression(receiver, f), name);
   }
 
   /**
@@ -608,7 +631,9 @@ export class SourceFileConverter {
     return undefined;
   }
 
-  getSoyBinaryOperator(operator: ts.Token<ts.BinaryOperator>): string|undefined {
+  getSoyBinaryOperator(
+    operator: ts.Token<ts.BinaryOperator>
+  ): string | undefined {
     switch (operator.kind) {
       case ts.SyntaxKind.AmpersandAmpersandToken:
         return 'and';
@@ -637,7 +662,7 @@ export class SourceFileConverter {
     return undefined;
   }
 
-  getSoyUnaryOperator(expr: ts.PrefixUnaryExpression): string|undefined {
+  getSoyUnaryOperator(expr: ts.PrefixUnaryExpression): string | undefined {
     switch (expr.operator) {
       case ts.SyntaxKind.ExclamationToken:
         return 'not';
@@ -646,6 +671,38 @@ export class SourceFileConverter {
     }
     this.report(expr, 'unsupported operator');
     return undefined;
+  }
+
+  getCustomElementName(node: ts.ClassDeclaration): string | undefined {
+    if (node.decorators === undefined) {
+      return;
+    }
+    for (const decorator of node.decorators) {
+      if (!ts.isCallExpression(decorator.expression)) {
+        continue;
+      }
+      const call = decorator.expression;
+      if (
+        this.isImportOf(
+          call.expression,
+          'customElement',
+          'lit-element/lib/decorators.js'
+        )
+      ) {
+        const args = call.arguments;
+        if (args.length !== 1) {
+          this.report(call, 'wrong number of arguments to customElement');
+          return;
+        }
+        const arg = args[0];
+        if (!ts.isStringLiteral(arg)) {
+          this.report(call, 'customElement argument must be a string literal');
+          return;
+        }
+        return arg.text;
+      }
+    }
+    return;
   }
 
   report(node: ts.Node, message: string) {
@@ -659,5 +716,4 @@ export class SourceFileConverter {
       message,
     });
   }
-
 }

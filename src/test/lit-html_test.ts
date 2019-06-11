@@ -174,6 +174,7 @@ suite('grimlock', () => {
         );
         assert.isAbove(result.diagnostics.length, 0);
         assert.include(result.diagnostics[0].message, 'unknown identifier');
+        assert.throws(() => result.output);
       });
 
       test('references to parameters', () => {
@@ -327,6 +328,7 @@ suite('grimlock', () => {
         assert.equal(result.diagnostics.length, 2);
         assert.include(result.diagnostics[0].message, '=== is disallowed');
         assert.include(result.diagnostics[1].message, '!== is disallowed');
+        assert.throws(() => result.output);
       });
 
       test('Array.length', () => {
