@@ -42,7 +42,9 @@ suite('grimlock', () => {
         
         {template .MyElement}
           {@param children: string}
-        <my-element>{$children}</my-element>
+        <my-element>
+        {$children}
+        {call .MyElement_shadow /}</my-element>
         {/template}
         
         {template .MyElement_shadow}
@@ -80,7 +82,10 @@ suite('grimlock', () => {
       {template .MyElement}
         {@param children: string}
         {@param name: string}
-      <my-element>{$children}</my-element>
+      <my-element>
+      {$children}
+      {call .MyElement_shadow}{param name: $name /}
+      {/call}</my-element>
       {/template}
       
       {template .MyElement_shadow}
@@ -122,7 +127,10 @@ suite('grimlock', () => {
       {template .MyElement}
         {@param children: string}
         {@param name: string}
-      <my-element>{$children}</my-element>
+      <my-element>
+      {$children}
+      {call .MyElement_shadow}{param name: $name /}
+      {/call}</my-element>
       {/template}
       
       {template .MyElement_shadow}
