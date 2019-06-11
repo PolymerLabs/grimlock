@@ -518,6 +518,35 @@ suite('grimlock', () => {
             `
         );
       });
+
+      test('object literals', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+            import {html} from 'lit-html';
+
+            /**
+             * @soyCompatible
+             */
+            export const t = () => {
+              const foo = {x: 6 * 7, y: 'everything'};
+              return html\`<p>The answer to \${foo.y} is $\{foo.x}\`;
+            };
+          `
+        );
+        assert.equal(
+          result.output,
+          soy`
+            {namespace test.ts}
+
+            {template .t}
+
+            {let $foo: record(x: 6 * 7, y: 'everything') /}
+            <p>The answer to {$foo.y} is {$foo.x}</p>
+            {/template}
+            `
+        );
+      });
     });
   });
 });

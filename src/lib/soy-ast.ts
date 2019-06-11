@@ -418,18 +418,23 @@ export class Ternary {
   }
 }
 
-export class MapLiteral {
-  entries: {[key: string]: Expression | null} | null;
+export class Record extends Expression {
+  entries: Array<[string, Expression]>;
 
-  constructor(entries: {[key: string]: Expression | null} | null) {
+  constructor(entries: Array<[string, Expression]>) {
+    super();
     this.entries = entries;
   }
-}
 
-export class ListLiteral {
-  items: Array<Expression> | null;
-
-  constructor(items: Array<Expression> | null) {
-    this.items = items;
+  emit(writer: Writable) {
+    writer.write('record(');
+    this.entries.forEach(([key, value], i) => {
+      writer.write(`${key}: `);
+      value.emit(writer);
+      if (i < this.entries.length - 1) {
+        writer.write(', ');
+      }
+    });
+    writer.write(')');
   }
 }
