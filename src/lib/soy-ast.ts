@@ -215,6 +215,32 @@ export class ForCommand extends Command {
   }
 }
 
+export class LetCommand extends Command {
+  identifier: string;
+  value: Node;
+  kind?: string;
+
+  constructor(identifier: string, value: Node, kind?: string) {
+    super();
+    this.identifier = identifier;
+    this.value = value;
+    this.kind = kind;
+  }
+
+  emit(writer: Writable) {
+    if (this.value instanceof Expression) {
+      writer.write(`\n{let $${this.identifier}: `);
+      this.value.emit(writer);
+      writer.write(' /}\n');
+    } else {
+      const kindString = this.kind === undefined ? '' : ` kind="${this.kind}"`;
+      writer.write(`\n{let $${this.identifier}${kindString}}\n`);
+      this.value.emit(writer);
+      writer.write('\n{/let}\n');
+    }
+  }
+}
+
 export abstract class Literal extends Expression {
   text: string;
 

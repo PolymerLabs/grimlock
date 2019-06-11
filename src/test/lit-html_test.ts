@@ -114,7 +114,7 @@ suite('grimlock', () => {
             /**
              * @soyCompatible
              */
-            const inner = () => html\`\${a}\`;
+            function f() {}
           };
         `
         );
@@ -485,6 +485,35 @@ suite('grimlock', () => {
             
               </ul>
             
+            {/template}
+            `
+        );
+      });
+
+      test('variable declarations', () => {
+        const result = convertModule(
+          'test.ts',
+          js`
+            import {html} from 'lit-html';
+
+            /**
+             * @soyCompatible
+             */
+            export const t = () => {
+              const x = 6 * 7;
+              return html\`<p>The answer is $\{x}\`;
+            };
+          `
+        );
+        assert.equal(
+          result.output,
+          soy`
+            {namespace test.ts}
+
+            {template .t}
+
+            {let $x: 6 * 7 /}
+            <p>The answer is {$x}</p>
             {/template}
             `
         );
