@@ -346,13 +346,13 @@ export class SourceFileConverter {
   }
 
   convertLitTaggedTemplateExpression(
-    node: ts.TaggedTemplateExpression,
+    templateLiteral: ts.TaggedTemplateExpression,
     scope: TemplateScope
   ): ast.Command[] {
     const commandStack: ast.Command[][] = [[]];
     let commands: ast.Command[] = commandStack[0];
 
-    const template = node.template as ts.TemplateLiteral;
+    const template = templateLiteral.template as ts.TemplateLiteral;
     const marker = '{{-lit-html-}}';
     const markerRegex = /{{-lit-html-}}/g;
     const strings: string[] = ts.isNoSubstitutionTemplateLiteral(template)
@@ -403,24 +403,33 @@ export class SourceFileConverter {
             commandStack.push(commands);
             commands = childrenCommands;
           } else {
-            commands.push(new ast.RawText(`<${node.tagName}>`));
+            commands.push(new ast.RawText(`<${node.tagName}`));
           }
-          for (const attr of node.attrs) {
-            const match = attr.value.match(markerRegex);
-            if (match === null) {
-              commands.push(new ast.RawText(` ${attr.name}="${attr.value}"`));
-            } else {
-              const exprCount = match.length;
-              for (let i = 0; i < exprCount; i++) {
-                commands.push(
-                  this.convertAttributeExpression(
-                    expressions[partTypes.length],
-                    scope
-                  )
-                );
-                partTypes.push('attribute');
-              }
+          for (const {name, value} of node.attrs) {
+            const textLiterals = value.split(markerRegex);
+            if (name.startsWith(".") || name.startsWith("?")  || name.startsWith("@")) {
+              // TODO: this likely shouldn't be a warning. Not rendering all
+              // attribute-position bindings is how things will just work, but
+              // this isn't developed out yet, so make a warning for now.
+              this.report(templateLiteral, `unsupported binding type: ${name[0]}`);
+              partTypes.push('attribute');
+              continue;
             }
+            commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
+            for (const textLiteral of textLiterals.slice(1)) {
+              commands.push(
+                this.convertAttributeExpression(
+                  expressions[partTypes.length],
+                  scope
+                )
+              );
+              commands.push(new ast.RawText(textLiteral));
+              partTypes.push('attribute');
+            }
+            commands.push(new ast.RawText('"'));
+          }
+          if (!isDefined) {
+            commands.push(new ast.RawText(`>`));
           }
         }
       },
