@@ -74,7 +74,7 @@ suite('grimlock', () => {
         );
       });
 
-      test('parameters and expression', () => {
+      test('parameters and text expression', () => {
         assert.equal(
           convertModule(
             'test.ts',
@@ -96,6 +96,33 @@ suite('grimlock', () => {
             {@param b: number}
             {@param c: bool}
           <div>{$a}{$b}{$c}</div>
+          {/template}
+        `
+        );
+      });
+
+      test('parameters and attribute expression', () => {
+        assert.equal(
+          convertModule(
+            'test.ts',
+            js`
+          import {html} from 'lit-html';
+
+          /**
+           * @soyCompatible
+           */
+          export const t = (a: string, b: number, c: boolean) => 
+              html\`<div class=\${a} .foo=\${b}>\${c}</div>\`;
+        `
+          ).output,
+          soy`
+          {namespace test.ts}
+
+          {template .t}
+            {@param a: string}
+            {@param b: number}
+            {@param c: bool}
+          <div class="{$a}">{$c}</div>
           {/template}
         `
         );
