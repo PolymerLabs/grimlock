@@ -570,7 +570,7 @@ export class SourceFileConverter {
               return [name, this.convertExpression(value, scope)];
             } else {
               this.report(p, 'unsupported object literal member');
-              return ['', new ast.Empty()];
+              return ['', new ast.ErrorExpression()];
             }
           }
         );
