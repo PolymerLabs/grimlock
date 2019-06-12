@@ -296,7 +296,7 @@ export class SourceFileConverter {
           const isConst = declarationList.flags & ts.NodeFlags.Const;
           if (!isConst) {
             this.report(declarationList, 'non-const variable declaration');
-            commands.push(new ast.Empty());
+            commands.push(new ast.ErrorExpression());
             continue;
           }
           for (const declaration of statement.declarationList.declarations) {
