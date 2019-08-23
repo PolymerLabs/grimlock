@@ -20,12 +20,12 @@ import * as parse5 from 'parse5';
 const traverseHtml = require('parse5-traverse');
 
 const isTextNode = (
-  node: parse5.DefaultTreeNode
-): node is parse5.DefaultTreeTextNode => node.nodeName === '#text';
+  node: parse5.AST.Default.Node
+): node is parse5.AST.Default.TextNode => node.nodeName === '#text';
 
 const isElementNode = (
-  node: parse5.DefaultTreeNode
-): node is parse5.DefaultTreeElement => 'tagName' in node;
+  node: parse5.AST.Default.Node
+): node is parse5.AST.Default.Element => 'tagName' in node;
 
 export type PartType = 'text' | 'attribute';
 
@@ -365,12 +365,12 @@ export class SourceFileConverter {
       ? []
       : [...template.templateSpans.map((s) => s.expression)];
     const html = strings.join(marker);
-    const fragment = parse5.parseFragment(html, {sourceCodeLocationInfo: true});
+    const fragment = parse5.parseFragment(html, {locationInfo: true});
     let partTypes: PartType[] = [];
 
     // commands.push(new ast.RawText(strings[0]));
     traverseHtml(fragment, {
-      pre: (node: parse5.DefaultTreeNode, _parent: parse5.Node) => {
+      pre: (node: parse5.AST.Default.Node, _parent: parse5.AST.Node) => {
         if (isTextNode(node)) {
           const text = node.value;
           const textLiterals = text.split(markerRegex);
@@ -433,7 +433,7 @@ export class SourceFileConverter {
           }
         }
       },
-      post: (node: parse5.DefaultTreeNode, _parent: parse5.Node) => {
+      post: (node: parse5.AST.Default.Node, _parent: parse5.AST.Node) => {
         if (isElementNode(node)) {
           const isDefined = this.definedElements.has(node.tagName);
           if (isDefined) {
