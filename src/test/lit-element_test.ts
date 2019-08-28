@@ -12,12 +12,11 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {assert} from 'chai';
 import {convertModule, js, soy} from './test-utils.js';
 
-suite('grimlock', () => {
-  suite('lit-element', () => {
-    test('converts a LitElement', () => {
+describe('grimlock', () => {
+  describe('lit-element', () => {
+    it('converts a LitElement', () => {
       const result = convertModule(
         'test.ts',
         js`
@@ -35,8 +34,7 @@ suite('grimlock', () => {
       }
     `
       );
-      assert.equal(
-        result.output,
+      expect(result.output).toEqual(
         soy`
         {namespace test.ts}
         
@@ -54,7 +52,7 @@ suite('grimlock', () => {
     });
   });
 
-  test('converts properties to params', () => {
+  it('converts properties to params', () => {
     const result = convertModule(
       'test.ts',
       js`
@@ -74,8 +72,7 @@ suite('grimlock', () => {
     }
   `
     );
-    assert.equal(
-      result.output,
+    expect(result.output).toEqual(
       soy`
       {namespace test.ts}
       
@@ -95,7 +92,7 @@ suite('grimlock', () => {
     );
   });
 
-  test('supports defined custom elements', () => {
+  it('supports defined custom elements', () => {
     const result = convertModule(
       'test.ts',
       js`
@@ -119,8 +116,7 @@ suite('grimlock', () => {
   `,
       {'child-element': 'ChildElement'}
     );
-    assert.equal(
-      result.output,
+    expect(result.output).toEqual(
       soy`
       {namespace test.ts}
       

@@ -12,52 +12,51 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {assert} from 'chai';
-import {convertModule, js, soy} from './test-utils.js';
+import 'jasmine';
 
-suite('grimlock', () => {
-  suite('lit-html', () => {
-    suite('template function declaration', () => {
-      test('simple declaration', () => {
-        assert.equal(
+import {convertModule, js, soy} from './test-utils';
+
+describe('grimlock', () => {
+  describe('lit-html', () => {
+    describe('template function declaration', () => {
+      it('simple declaration', () => {
+        expect(
           convertModule(
             'test.ts',
             js`
-          import {html} from 'lit-html';
+                import {html} from 'lit-html';
 
-          /**
-           * @soyCompatible
-           */
-          export const t = () => html\`<div></div>\`;
-        `
-          ).output,
-          soy`
-          {namespace test.ts}
+                /**
+                 * @soyCompatible
+                 */
+                export const t = () => html\`<div></div>\`;
+                        `
+          ).output
+        ).toEqual(soy`
+                {namespace test.ts}
 
-          {template .t}
-          <div></div>
-          {/template}
-        `
-        );
+                {template .t}
+                <div></div>
+                {/template}
+              `);
       });
 
-      test('missing @soyCompatible', () => {
+      it('missing @soyCompatible', () => {
         // Documenting current behavior. Perhaps we shold error with
         // "nothing to translate"
-        assert.equal(
+        expect(
           convertModule(
             'test.ts',
             js`
-          import {html} from 'lit-html';
-        `
-          ).output,
-          soy`
-          {namespace test.ts}
-        `
-        );
+                import {html} from 'lit-html';
+              `
+          ).output
+        ).toEqual(soy`
+                {namespace test.ts}
+              `);
       });
 
-      test('incorrect html tag', () => {
+      it('incorrect html tag', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -67,15 +66,14 @@ suite('grimlock', () => {
           export const t = () => html\`<div></div>\`;
           `
         );
-        assert.equal(result.diagnostics.length, 1);
-        assert.include(
-          result.diagnostics[0].message,
+        expect(result.diagnostics.length).toEqual(1);
+        expect(result.diagnostics[0].message).toContain(
           'must return a TemplateResult'
         );
       });
 
-      test('parameters and text expression', () => {
-        assert.equal(
+      it('parameters and text expression', () => {
+        expect(
           convertModule(
             'test.ts',
             js`
@@ -87,8 +85,8 @@ suite('grimlock', () => {
           export const t = (a: string, b: number, c: boolean) => 
               html\`<div>\${a}\${b}\${c}</div>\`;
         `
-          ).output,
-          soy`
+          ).output
+        ).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -97,12 +95,11 @@ suite('grimlock', () => {
             {@param c: bool}
           <div>{$a}{$b}{$c}</div>
           {/template}
-        `
-        );
+        `);
       });
 
-      test('parameters and attribute expression', () => {
-        assert.equal(
+      it('parameters and attribute expression', () => {
+        expect(
           convertModule(
             'test.ts',
             js`
@@ -114,8 +111,8 @@ suite('grimlock', () => {
           export const t = (a: string, b: number, c: boolean) => 
               html\`<div class=\${a} .foo=\${b}>\${c}</div>\`;
         `
-          ).output,
-          soy`
+          ).output
+        ).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -124,11 +121,10 @@ suite('grimlock', () => {
             {@param c: bool}
           <div class="{$a}">{$c}</div>
           {/template}
-        `
-        );
+        `);
       });
 
-      test('error on unsupported statements', () => {
+      it('error on unsupported statements', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -145,18 +141,19 @@ suite('grimlock', () => {
           };
         `
         );
-        assert.equal(result.diagnostics.length, 2);
-        assert.include(result.diagnostics[0].message, 'unsupported statement');
-        assert.include(
-          result.diagnostics[1].message,
+        expect(result.diagnostics.length).toEqual(2);
+        expect(result.diagnostics[0].message).toContain(
+          'unsupported statement'
+        );
+        expect(result.diagnostics[1].message).toContain(
           'must return a TemplateResult'
         );
       });
     });
 
-    suite('expressions', () => {
-      test('subtemplate call', () => {
-        assert.equal(
+    describe('expressions', () => {
+      it('subtemplate call', () => {
+        expect(
           convertModule(
             'test.ts',
             js`
@@ -172,8 +169,8 @@ suite('grimlock', () => {
            */
           export const t1 = () => html\`<div></div>\`;
         `
-          ).output,
-          soy`
+          ).output
+        ).toEqual(soy`
           {namespace test.ts}
 
           {template .t2}
@@ -183,11 +180,10 @@ suite('grimlock', () => {
           {template .t1}
           <div></div>
           {/template}
-        `
-        );
+        `);
       });
 
-      test('error on unknown reference', () => {
+      it('error on unknown reference', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -199,12 +195,15 @@ suite('grimlock', () => {
           export const t = () => html\`\${a}\`;
         `
         );
-        assert.isAbove(result.diagnostics.length, 0);
-        assert.include(result.diagnostics[0].message, 'unknown identifier');
-        assert.throws(() => result.output);
+        expect(result.diagnostics.length).toBeGreaterThan(0);
+        expect(result.diagnostics[0].message).toContain('unknown identifier');
+        expect(() => {
+          // tslint:disable-next-line:no-unused-expression Check for throw
+          result.output;
+        }).toThrow();
       });
 
-      test('references to parameters', () => {
+      it('references to parameters', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -216,18 +215,15 @@ suite('grimlock', () => {
           export const t = (a: string) => html\`\${a}\`;
         `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param a: string}
           {$a}
           {/template}
-        `
-        );
-        assert.equal(result.diagnostics.length, 0);
+        `);
+        expect(result.diagnostics.length).toEqual(0);
       });
 
       const binaryOps = [
@@ -249,7 +245,7 @@ suite('grimlock', () => {
           expected = op[1];
           op = op[0];
         }
-        test(`binary ${op} operator`, () => {
+        it(`binary ${op} operator`, () => {
           const result = convertModule(
             'test.ts',
             js`
@@ -261,9 +257,7 @@ suite('grimlock', () => {
             export const t = (a: string, b: string) => html\`\${a ${op} b}\`;
           `
           );
-          assert.equal(
-            result.output,
-            soy`
+          expect(result.output).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -271,13 +265,12 @@ suite('grimlock', () => {
               {@param b: string}
             {$a ${expected} $b}
             {/template}
-          `
-          );
-          assert.equal(result.diagnostics.length, 0);
+          `);
+          expect(result.diagnostics.length).toEqual(0);
         });
       }
 
-      test('text ternary', () => {
+      it('text ternary', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -293,14 +286,12 @@ suite('grimlock', () => {
           }</div>\`;
       `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param yes: bool}
-          
+
             <div>
           {if $yes}
           <p>yes</p>
@@ -309,11 +300,10 @@ suite('grimlock', () => {
           {/if}
           </div>
           {/template}
-        `
-        );
+        `);
       });
 
-      test('expression ternary', () => {
+      it('expression ternary', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -326,21 +316,18 @@ suite('grimlock', () => {
           <div>\${1 + (yes ? 1 : 2)}</div>\`;
       `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param yes: bool}
-          
+
             <div>{1 + ($yes ? 1 : 2)}</div>
           {/template}
-        `
-        );
+        `);
       });
 
-      test(`error on strict equality`, () => {
+      it(`error on strict equality`, () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -352,13 +339,16 @@ suite('grimlock', () => {
           export const t = (a: string, b: string) => html\`\${a === b}\${a !== b}\`;
         `
         );
-        assert.equal(result.diagnostics.length, 2);
-        assert.include(result.diagnostics[0].message, '=== is disallowed');
-        assert.include(result.diagnostics[1].message, '!== is disallowed');
-        assert.throws(() => result.output);
+        expect(result.diagnostics.length).toEqual(2);
+        expect(result.diagnostics[0].message).toContain('=== is disallowed');
+        expect(result.diagnostics[1].message).toContain('!== is disallowed');
+        expect(() => {
+          // tslint:disable-next-line:no-unused-expression Check for throw
+          result.output;
+        }).toThrow();
       });
 
-      test('Array.length', () => {
+      it('Array.length', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -370,21 +360,18 @@ suite('grimlock', () => {
           export const t = (a: string[]) => html\`\${a.length}\`;
         `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param a: list<string>}
           {length($a)}
           {/template}
-        `
-        );
-        assert.equal(result.diagnostics.length, 0);
+        `);
+        expect(result.diagnostics.length).toEqual(0);
       });
 
-      test('String.length', () => {
+      it('String.length', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -396,21 +383,18 @@ suite('grimlock', () => {
           export const t = (a: string) => html\`\${a.length}\`;
         `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param a: string}
           {strLen($a)}
           {/template}
-        `
-        );
-        assert.equal(result.diagnostics.length, 0);
+        `);
+        expect(result.diagnostics.length).toEqual(0);
       });
 
-      test('String.includes()', () => {
+      it('String.includes()', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -422,21 +406,18 @@ suite('grimlock', () => {
           export const t = (a: string) => html\`\${a.includes('a')}\`;
         `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
             {@param a: string}
           {strContains($a, 'a')}
           {/template}
-        `
-        );
-        assert.equal(result.diagnostics.length, 0);
+        `);
+        expect(result.diagnostics.length).toEqual(0);
       });
 
-      test('Array.map', () => {
+      it('Array.map', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -452,28 +433,25 @@ suite('grimlock', () => {
             \`;
           `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
               {@param items: list<string>}
-            
+
               <ul>
                 
             {for $item in $items}
             <li>{$item}</li>
             {/for}
-            
+
               </ul>
-            
+
             {/template}
-            `
-        );
+            `);
       });
 
-      test('Array.map with free variables', () => {
+      it('Array.map with free variables', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -489,15 +467,13 @@ suite('grimlock', () => {
             \`;
           `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
               {@param items: list<string>}
               {@param x: bool}
-            
+
               <ul>
                 
             {for $item in $items}
@@ -509,15 +485,14 @@ suite('grimlock', () => {
             {/if}
             </li>
             {/for}
-            
+
               </ul>
-            
+
             {/template}
-            `
-        );
+            `);
       });
 
-      test('variable declarations', () => {
+      it('variable declarations', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -532,9 +507,7 @@ suite('grimlock', () => {
             };
           `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -542,11 +515,10 @@ suite('grimlock', () => {
             {let $x: 6 * 7 /}
             <p>The answer is {$x}</p>
             {/template}
-            `
-        );
+            `);
       });
 
-      test('object literals', () => {
+      it('object literals', () => {
         const result = convertModule(
           'test.ts',
           js`
@@ -561,9 +533,7 @@ suite('grimlock', () => {
             };
           `
         );
-        assert.equal(
-          result.output,
-          soy`
+        expect(result.output).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -571,8 +541,7 @@ suite('grimlock', () => {
             {let $foo: record(x: 6 * 7, y: 'everything') /}
             <p>The answer to {$foo.y} is {$foo.x}</p>
             {/template}
-            `
-        );
+            `);
       });
     });
   });

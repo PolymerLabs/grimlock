@@ -13,12 +13,12 @@
  */
 
 import ts from 'typescript';
-import {assert} from 'chai';
+import 'jasmine';
 import {convertModule, js} from './test-utils.js';
 
-suite('grimlock', () => {
-  suite('SourceFileConverter', () => {
-    test('isImportOf', () => {
+describe('grimlock', () => {
+  describe('SourceFileConverter', () => {
+    it('isImportOf', () => {
       const {converter} = convertModule(
         'test.ts',
         js`
@@ -47,9 +47,11 @@ suite('grimlock', () => {
       const templates = findTaggedTemplateExpressions(converter.sourceFile);
       const litTemplate = templates[0];
       const nonLitTemplate = templates[1];
-      assert.isTrue(converter.isImportOf(litTemplate.tag, 'html', 'lit-html'));
-      assert.isFalse(
-        converter.isImportOf(nonLitTemplate.tag, 'html', 'lit-html')
+      expect(converter.isImportOf(litTemplate.tag, 'html', 'lit-html')).toBe(
+        true
+      );
+      expect(converter.isImportOf(nonLitTemplate.tag, 'html', 'lit-html')).toBe(
+        false
       );
     });
   });
