@@ -17,7 +17,6 @@ import ts from 'typescript';
 import * as path from 'path';
 import * as fs from 'fs';
 import {stripIndentTag} from '../lib/utils.js';
-import {assert} from 'chai';
 
 const {WritableStream} = require('memory-streams');
 
@@ -124,7 +123,7 @@ export const convertModule = (
     console.error(
       diagnostics.map((d) => `${d.file.fileName}: ${d.messageText}`)
     );
-    assert.fail('syntax errors in test input');
+    throw new Error('syntax errors in test input');
   }
 
   const definedElementsMap =

@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "format": "prettier src/**/*.ts --write",
-    "test": "mocha --ui=tdd -r source-map-support/register \"test/**/*_test.js\"",
+    "test": "jasmine \"test/**/*_test.js\"",
     "test:sample": "node ./lib/index.js ./test/test-files/template-1.ts"
   },
   "keywords": [],
@@ -25,12 +25,10 @@
     "typescript": "^3.4.5"
   },
   "devDependencies": {
-    "@types/chai": "^4.1.7",
-    "@types/mocha": "^5.2.6",
-    "chai": "^4.2.0",
+    "@types/jasmine": "^3.4.0",
+    "jasmine": "^3.4.0",
     "lit-element": "^2.1.0",
     "lit-html": "^1.1.0",
-    "mocha": "^6.1.4",
     "prettier": "^1.17.1"
   }
 }

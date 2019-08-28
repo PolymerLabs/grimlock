@@ -407,11 +407,18 @@ export class SourceFileConverter {
           }
           for (const {name, value} of node.attrs) {
             const textLiterals = value.split(markerRegex);
-            if (name.startsWith(".") || name.startsWith("?")  || name.startsWith("@")) {
+            if (
+              name.startsWith('.') ||
+              name.startsWith('?') ||
+              name.startsWith('@')
+            ) {
               // TODO: this likely shouldn't be a warning. Not rendering all
               // attribute-position bindings is how things will just work, but
               // this isn't developed out yet, so make a warning for now.
-              this.report(templateLiteral, `unsupported binding type: ${name[0]}`);
+              this.report(
+                templateLiteral,
+                `unsupported binding type: ${name[0]}`
+              );
               partTypes.push('attribute');
               continue;
             }
