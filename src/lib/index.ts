@@ -17,7 +17,7 @@ import {isAssignableToType, SimpleType, SimpleTypeKind} from 'ts-simple-type';
 import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
-const traverseHtml = require('parse5-traverse');
+import {traverseHtml} from './utils.js';
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -370,7 +370,7 @@ export class SourceFileConverter {
 
     // commands.push(new ast.RawText(strings[0]));
     traverseHtml(fragment, {
-      pre: (node: parse5.AST.Default.Node, _parent: parse5.AST.Node) => {
+      pre: (node: parse5.AST.Default.Node) => {
         if (isTextNode(node)) {
           const text = node.value;
           const textLiterals = text.split(markerRegex);
@@ -440,7 +440,7 @@ export class SourceFileConverter {
           }
         }
       },
-      post: (node: parse5.AST.Default.Node, _parent: parse5.AST.Node) => {
+      post: (node: parse5.AST.Default.Node) => {
         if (isElementNode(node)) {
           const isDefined = this.definedElements.has(node.tagName);
           if (isDefined) {
