@@ -13,6 +13,7 @@
  */
 
 import stripIndent = require('strip-indent');
+import * as parse5 from 'parse5';
 
 export const stripIndentTag = (trim: boolean = false) => (
   strings: TemplateStringsArray,
@@ -24,3 +25,25 @@ export const stripIndentTag = (trim: boolean = false) => (
   return trim ? result.trim() : result;
 };
 export const soy = stripIndentTag();
+
+/**
+ * Actions to be executed on nodes during a tree traversal.
+ */
+export type TraverseActions = {
+  pre: (node: parse5.AST.Default.Node) => void;
+  post: (node: parse5.AST.Default.Node) => void;
+}
+
+/**
+ * Perform a tree traversal starting at the given node. Execute
+ * pre-order and post-order actions on each node.
+ */
+export const traverseHtml = (node: parse5.AST.Node, actions: TraverseActions) => {
+  actions.pre(node as parse5.AST.Default.Node);
+  if ((node as parse5.AST.Default.ParentNode).childNodes) {
+    for (const child of (node as parse5.AST.Default.ParentNode).childNodes) {
+      traverseHtml(child, actions);
+    }
+  }
+  actions.post(node as parse5.AST.Default.Node);
+}
