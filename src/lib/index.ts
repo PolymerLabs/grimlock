@@ -18,6 +18,7 @@ import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
+import {reflectedAttributeName} from './reflected-attribute-name.js'
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -26,6 +27,14 @@ const isTextNode = (
 const isElementNode = (
   node: parse5.AST.Default.Node
 ): node is parse5.AST.Default.Element => 'tagName' in node;
+
+/**
+ * Whether an element is an empty element (can't have children)
+ */
+const emptyElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const isEmptyElement = (
+  element: parse5.AST.Default.Element
+): boolean => emptyElements.has(element.tagName);
 
 export type PartType = 'text' | 'attribute';
 
@@ -355,6 +364,9 @@ export class SourceFileConverter {
     const template = templateLiteral.template as ts.TemplateLiteral;
     const marker = '{{-lit-html-}}';
     const markerRegex = /{{-lit-html-}}/g;
+    const lastAttributeNameRegex =
+      /([ \x09\x0a\x0c\x0d])([^\0-\x1F\x7F-\x9F "'>=/]+)([ \x09\x0a\x0c\x0d]*=[ \x09\x0a\x0c\x0d]*(?:[^ \x09\x0a\x0c\x0d"'`<>=]*|"[^"]*|'[^']*))$/;
+
     const strings: string[] = ts.isNoSubstitutionTemplateLiteral(template)
       ? [template.text]
       : [
@@ -405,10 +417,18 @@ export class SourceFileConverter {
           } else {
             commands.push(new ast.RawText(`<${node.tagName}`));
           }
-          for (const {name, value} of node.attrs) {
-            const textLiterals = value.split(markerRegex);
-            if (
-              name.startsWith('.') ||
+          for (let {name, value} of node.attrs) {
+            if (name.startsWith('.')) {
+              // Need to get name from source to ensure proper casing.
+              const propertyName = lastAttributeNameRegex.exec(strings[partTypes.length])![2];
+              const reflectedName = reflectedAttributeName(propertyName.slice(1), node.tagName);
+              if (reflectedName !== undefined) {
+                name = reflectedName;
+              } else {
+                partTypes.push('attribute');
+                continue;  
+              }
+            } else if (
               name.startsWith('?') ||
               name.startsWith('@')
             ) {
@@ -422,6 +442,7 @@ export class SourceFileConverter {
               partTypes.push('attribute');
               continue;
             }
+            const textLiterals = value.split(markerRegex);
             commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
             for (const textLiteral of textLiterals.slice(1)) {
               commands.push(
@@ -446,7 +467,7 @@ export class SourceFileConverter {
           if (isDefined) {
             commandStack.pop();
             commands = commandStack[commandStack.length - 1];
-          } else {
+          } else if (!isEmptyElement(node)) {
             commands.push(new ast.RawText(`</${node.tagName}>`));
           }
         }

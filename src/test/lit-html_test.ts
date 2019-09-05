@@ -124,6 +124,30 @@ describe('grimlock', () => {
         `);
       });
 
+      it('reflecting property expressions', () => {
+        expect(
+          convertModule(
+            'test.ts',
+            js`
+                import {html} from 'lit-html';
+
+                /**
+                 * @soyCompatible
+                 */
+                export const t = () => {
+                  return html\`<input .value=\${"foo"} .className=\${"bar"}>\`
+                };
+              `
+          ).output
+        ).toEqual(soy`
+                {namespace test.ts}
+
+                {template .t}
+                <input value="{"foo"}" class="{"bar"}">
+                {/template}
+              `);
+      });
+
       it('error on unsupported statements', () => {
         const result = convertModule(
           'test.ts',
