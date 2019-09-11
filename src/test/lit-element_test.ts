@@ -184,4 +184,31 @@ describe('grimlock', () => {
       {/template}`
     );
   });
+
+  it('errors when referenced property is not decorated with @property()', () => {
+    const result = convertModule(
+      'test.ts',
+      js`
+    import {LitElement, html} from 'lit-element';
+    import {customElement} from 'lit-element/lib/decorators.js';
+
+    /**
+     * @soyCompatible
+     */
+    @customElement('my-element')
+    export class MyElement extends LitElement {
+      bar: string;
+
+      render() {
+        return html\`<h1>Hello \${this.bar}</h1>\`;
+      }
+    }
+  `
+    );
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+    expect(result.diagnostics[0].message).toEqual('referenced properties must be annotated with @property()');
+    expect(() => {
+      result.output;
+    }).toThrow();
+  });
 });

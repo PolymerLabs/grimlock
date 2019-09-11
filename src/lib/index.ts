@@ -687,6 +687,9 @@ export class SourceFileConverter {
             this.report(node, 'unknown class property');
             return new ast.ErrorExpression();
           }
+          if (!this.isLitElementProperty(symbol.declarations[0] as ts.PropertyDeclaration)) {
+            this.report(node, 'referenced properties must be annotated with @property()');
+            return new ast.ErrorExpression();
           }
           return new ast.Identifier(symbol.name);
         }
