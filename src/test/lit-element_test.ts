@@ -141,4 +141,47 @@ describe('grimlock', () => {
       {/template}`
     );
   });
+
+  it('handles inherited properties', () => {
+    const result = convertModule(
+      'test.ts',
+      js`
+    import {LitElement, html} from 'lit-element';
+    import {customElement, property} from 'lit-element/lib/decorators.js';
+
+    class MyElementParent extends LitElement {
+      @property() bar: string;
+    }
+
+    /**
+     * @soyCompatible
+     */
+    @customElement('my-element')
+    export class MyElement extends MyElementParent {
+
+      render() {
+        return html\`<h1>Hello \${this.bar}</h1>\`;
+      }
+    }
+  `
+    );
+    expect(result.output).toEqual(
+      soy`
+      {namespace test.ts}
+      
+      {template .MyElement}
+        {@param children: string}
+        {@param bar: string}
+      <my-element>
+      {$children}
+      {call .MyElement_shadow}{param bar: $bar /}
+      {/call}</my-element>
+      {/template}
+      
+      {template .MyElement_shadow}
+        {@param bar: string}
+      <h1>Hello {$bar}</h1>
+      {/template}`
+    );
+  });
 });

@@ -687,22 +687,17 @@ export class SourceFileConverter {
             this.report(node, 'unknown class property');
             return new ast.ErrorExpression();
           }
-          const declaration = symbol.declarations[0];
-          for (const member of scope.element.members) {
-            if (declaration === member) {
-              // TODO: check that it's a decorated property
-              const name = (node as ts.PropertyAccessExpression).name;
-              return new ast.Identifier(name.getText());
-            }
           }
+          return new ast.Identifier(symbol.name);
         }
+
         return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
           scope
         );
       }
     }
-    this.report(node, `unsuported expression: ${node.getText()}`);
+    this.report(node, `unsupported expression: ${node.getText()}`);
     return new ast.ErrorExpression();
   }
 
@@ -765,9 +760,28 @@ export class SourceFileConverter {
     return false;
   }
 
+  /**
+   * Return each class declaration in the given nodes lineage, including
+   * the given node, up to and not including LitElement.
+   */
+  getHeritage(node: ts.ClassDeclaration): ts.ClassDeclaration[] {
+    // No more inheritance
+    if (node.heritageClauses === undefined) {
+      return [node];
+    }
+    const parentType = node.heritageClauses[0].types[0];
+    // Reached LitElement
+    if (parentType.expression.getText() === 'LitElement') {
+      return [node];
+    }
+    const parentDeclaration = this.checker.getTypeFromTypeNode(parentType).symbol.declarations[0] as ts.ClassDeclaration;
+    return [node].concat(this.getHeritage(parentDeclaration));
+  }
+
   getLitElementProperties(node: ts.ClassDeclaration) {
-    return node.members.filter(
-      (m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
+    return this.getHeritage(node).map((node) => node.members)
+      .reduce((acc, cur) => ts.createNodeArray(acc.concat(cur)))
+      .filter((m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
     ) as ts.PropertyDeclaration[];
   }
 
