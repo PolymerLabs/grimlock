@@ -211,4 +211,156 @@ describe('grimlock', () => {
       result.output;
     }).toThrow();
   });
+
+  describe('event bindings', () => {
+    it('converts event binding', () => {
+      const result = convertModule(
+        'test.ts',
+        js`
+      import {LitElement, html} from 'lit-element';
+      import {customElement} from 'lit-element/lib/decorators.js';
+
+      /**
+       * @soyCompatible
+       */
+      @customElement('my-element')
+      export class MyElement extends LitElement {
+        _onButtonClick() {}
+
+        render() {
+          return html\`<button @click=\${this._onButtonClick}>Click Me</button>\`;
+        }
+      }
+    `
+      );
+      expect(result.output).toEqual(
+        soy`
+        {namespace test.ts}
+        
+        {template .MyElement}
+          {@param children: string}
+        <my-element>
+        {$children}
+        {call .MyElement_shadow /}</my-element>
+        {/template}
+        
+        {template .MyElement_shadow}
+        <button jsaction="click:{xid('_onButtonClick')}">Click Me</button>
+        {/template}`
+      );
+    });
+
+    it('converts event binding with reference to an inherited method', () => {
+      const result = convertModule(
+        'test.ts',
+        js`
+      import {LitElement, html} from 'lit-element';
+      import {customElement} from 'lit-element/lib/decorators.js';
+
+      class ParentElement extends LitElement {
+        _onButtonClick() {}
+      }
+
+      /**
+       * @soyCompatible
+       */
+      @customElement('my-element')
+      export class MyElement extends ParentElement {
+        render() {
+          return html\`<button @click=\${this._onButtonClick}>Click Me</button>\`;
+        }
+      }
+    `
+      );
+      expect(result.output).toEqual(
+        soy`
+        {namespace test.ts}
+        
+        {template .MyElement}
+          {@param children: string}
+        <my-element>
+        {$children}
+        {call .MyElement_shadow /}</my-element>
+        {/template}
+        
+        {template .MyElement_shadow}
+        <button jsaction="click:{xid('_onButtonClick')}">Click Me</button>
+        {/template}`
+      );
+    });
+
+    it('does not convert unknown references', () => {
+      const result = convertModule(
+        'test.ts',
+        js`
+      import {LitElement, html} from 'lit-element';
+      import {customElement} from 'lit-element/lib/decorators.js';
+
+      /**
+       * @soyCompatible
+       */
+      @customElement('my-element')
+      export class MyElement extends LitElement {
+        render() {
+          return html\`<button @click=\${this._doesNotExist}>Click Me</button>\`;
+        }
+      }
+    `
+      );
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.diagnostics[0].message).toContain('unknown class method');
+      expect(result.output).toEqual(
+        soy`
+        {namespace test.ts}
+        
+        {template .MyElement}
+          {@param children: string}
+        <my-element>
+        {$children}
+        {call .MyElement_shadow /}</my-element>
+        {/template}
+        
+        {template .MyElement_shadow}
+        <button>Click Me</button>
+        {/template}`
+      );
+    })
+
+    it('does not convert event binding that is not an instance method reference.', () => {
+      const result = convertModule(
+        'test.ts',
+        js`
+      import {LitElement, html} from 'lit-element';
+      import {customElement} from 'lit-element/lib/decorators.js';
+
+      /**
+       * @soyCompatible
+       */
+      @customElement('my-element')
+      export class MyElement extends LitElement {
+        render() {
+          return html\`<button @click=\${console.log}>Click Me</button>\`;
+        }
+      }
+    `
+      );
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.diagnostics[0].message).toContain('event bindings must be instance method references: console.log');
+      expect(result.output).toEqual(
+        soy`
+        {namespace test.ts}
+        
+        {template .MyElement}
+          {@param children: string}
+        <my-element>
+        {$children}
+        {call .MyElement_shadow /}</my-element>
+        {/template}
+        
+        {template .MyElement_shadow}
+        <button>Click Me</button>
+        {/template}`
+      );
+    });
+  });
 });

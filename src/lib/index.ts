@@ -421,9 +421,17 @@ export class SourceFileConverter {
                 partTypes.push('attribute');
                 continue;
               }
+            } else if (name.startsWith('@')) {
+              const listenerExpression = expressions[partTypes.length];
+              partTypes.push('attribute');
+              const eventType = name.slice(1);
+              const listenerCommand = this.convertListenerExpression(listenerExpression, eventType);
+              if (listenerCommand !== undefined) {
+                commands.push(listenerCommand);
+              }
+              continue;
             } else if (
-              name.startsWith('?') ||
-              name.startsWith('@')
+              name.startsWith('?')
             ) {
               // TODO: this likely shouldn't be a warning. Not rendering all
               // attribute-position bindings is how things will just work, but
@@ -434,7 +442,7 @@ export class SourceFileConverter {
               );
               partTypes.push('attribute');
               continue;
-            }
+            } 
             const textLiterals = value.split(markerRegex);
             commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
             for (const textLiteral of textLiterals.slice(1)) {
@@ -467,6 +475,33 @@ export class SourceFileConverter {
       },
     });
     return commandStack[0];
+  }
+
+  /**
+   * Convert event binding into a jsaction.
+   */
+  convertListenerExpression(node: ts.Expression, eventType: string): ast.Command | undefined {
+    const symbol = this.checker.getSymbolAtLocation(node);
+
+    // Referenced method is not in scope.
+    if (symbol === undefined) {
+      this.report(node, 'unknown class method');
+      return;
+    }
+
+    // Referenced method is not an instance method.
+    if (
+      !(ts.isPropertyAccessExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ThisKeyword)
+    ) {
+      this.report(
+        node,
+        `event bindings must be instance method references: ${node.getText()}`
+      );
+      return;
+    }
+
+    return new ast.RawText(` jsaction="${eventType}:{xid('${symbol.getName()}')}"`);
   }
 
   /*
