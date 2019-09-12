@@ -28,14 +28,6 @@ const isElementNode = (
   node: parse5.AST.Default.Node
 ): node is parse5.AST.Default.Element => 'tagName' in node;
 
-/**
- * Whether an element is an empty element (can't have children)
- */
-const emptyElements = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'keygen', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
-const isEmptyElement = (
-  element: parse5.AST.Default.Element
-): boolean => emptyElements.has(element.tagName);
-
 export type PartType = 'text' | 'attribute';
 
 const litTemplateDeclarations = new Map<
@@ -468,7 +460,7 @@ export class SourceFileConverter {
           if (isDefined) {
             commandStack.pop();
             commands = commandStack[commandStack.length - 1];
-          } else if (!isEmptyElement(node)) {
+          } else if (node.__location!.endTag !== undefined) {
             commands.push(new ast.RawText(`</${node.tagName}>`));
           }
         }

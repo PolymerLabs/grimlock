@@ -173,6 +173,9 @@ describe('grimlock', () => {
           'must return a TemplateResult'
         );
       });
+
+      // TODO: add tests for keeping unclosed/closed tags.
+      // E.g., an input of <div> should output <div>, not <div></div>.
     });
 
     describe('expressions', () => {
@@ -527,7 +530,7 @@ describe('grimlock', () => {
              */
             export const t = () => {
               const x = 6 * 7;
-              return html\`<p>The answer is $\{x}\`;
+              return html\`<p>The answer is $\{x}</p>\`;
             };
           `
         );
@@ -553,7 +556,7 @@ describe('grimlock', () => {
              */
             export const t = () => {
               const foo = {x: 6 * 7, y: 'everything'};
-              return html\`<p>The answer to \${foo.y} is $\{foo.x}\`;
+              return html\`<p>The answer to \${foo.y} is $\{foo.x}</p>\`;
             };
           `
         );
