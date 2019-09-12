@@ -28,20 +28,24 @@ const reflectedAttributesSource: Array<{
 // data structure into a map of maps for faster lookup at runtime.
 const reflectedAttributes = new Map<string, Map<string, string>>();
 const addReflectionForElement = (elementName: string, propertyName: string, attributeName: string) => {
-  if (reflectedAttributes.has(elementName)) {
-    reflectedAttributes.get(elementName)!.set(propertyName, attributeName);
-  } else {
-    reflectedAttributes.set(elementName, new Map([[propertyName, attributeName]]));
+  let reflectedAttribute = reflectedAttributes.get(elementName);
+  if (reflectedAttribute === undefined) {
+    reflectedAttribute = new Map();
+    reflectedAttributes.set(elementName, reflectedAttribute);
   }
+  reflectedAttribute.set(propertyName, attributeName);
 };
 const addReflectionsForElement = (elementName: string, reflections: Array<string|Array<string>>) => {
   for (const reflection of reflections) {
-    if (reflection instanceof Array) {
-      // Property has a different reflected attribute name.
-      addReflectionForElement(elementName, reflection[0], reflection[1]);
+    let propertyName, attributeName;
+    if (Array.isArray(reflection)) {
+      propertyName = reflection[0];
+      attributeName = reflection[1];
     } else {
-      addReflectionForElement(elementName, reflection, reflection);
+      propertyName = reflection;
+      attributeName = reflection;
     }
+    addReflectionForElement(elementName, propertyName, attributeName);
   }
 };
 for (const entry of reflectedAttributesSource) {
@@ -54,7 +58,7 @@ for (const entry of reflectedAttributesSource) {
  * Given a property name and element tag name, return the name of the corresponding
  * reflected attribute, or undefined if it doesn't exist.
  */
-export const reflectedAttributeName = (propertyName: string, tagName: string) => {
+export const getReflectedAttributeName = (propertyName: string, tagName: string) => {
   const attributes = reflectedAttributes.get(tagName);
   if (attributes !== undefined && attributes.has(propertyName)) {
     return attributes.get(propertyName);

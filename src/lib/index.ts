@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
-import {reflectedAttributeName} from './reflected-attribute-name.js'
+import {getReflectedAttributeName} from './reflected-attribute-name.js'
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -420,13 +420,14 @@ export class SourceFileConverter {
           for (let {name, value} of node.attrs) {
             if (name.startsWith('.')) {
               // Need to get name from source to ensure proper casing.
-              const propertyName = lastAttributeNameRegex.exec(strings[partTypes.length])![2];
-              const reflectedName = reflectedAttributeName(propertyName.slice(1), node.tagName);
-              if (reflectedName !== undefined) {
-                name = reflectedName;
+              const attributeName = lastAttributeNameRegex.exec(strings[partTypes.length])![2];
+              const propertyName = attributeName.slice(1);
+              const reflectedAttributeName = getReflectedAttributeName(propertyName, node.tagName);
+              if (reflectedAttributeName !== undefined) {
+                name = reflectedAttributeName;
               } else {
                 partTypes.push('attribute');
-                continue;  
+                continue;
               }
             } else if (
               name.startsWith('?') ||

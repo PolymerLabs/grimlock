@@ -12,22 +12,22 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {reflectedAttributeName} from '../lib/reflected-attribute-name.js';
+import {getReflectedAttributeName} from '../lib/reflected-attribute-name.js';
 
 describe('reflectedAttributeName', () => {
   it('property with same reflected name', () => {
-    expect(reflectedAttributeName('value', 'input')).toEqual('value');
+    expect(getReflectedAttributeName('value', 'input')).toEqual('value');
   });
 
   it('property with different reflected name', () => {
-    expect(reflectedAttributeName('className', 'input')).toEqual('class');
+    expect(getReflectedAttributeName('className', 'input')).toEqual('class');
   });
 
   it('property with no reflection', () => {
-    expect(reflectedAttributeName('blah', 'input')).toBeUndefined();
+    expect(getReflectedAttributeName('blah', 'input')).toBeUndefined();
   });
 
   it('global property', () => {
-    expect(reflectedAttributeName('id', 'div')).toEqual('id');
+    expect(getReflectedAttributeName('id', 'div')).toEqual('id');
   });
 });
