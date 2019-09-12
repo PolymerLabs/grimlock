@@ -124,6 +124,11 @@ describe('grimlock', () => {
         `);
       });
 
+      // TODO: add test cases for
+      // - `class` and `.className` on same element
+      // - input with `.value` and `.checked`
+      // - `.id`, `.tabIndex`, etc.
+      // - event bindings such as `.onclick`
       it('reflecting property expressions', () => {
         expect(
           convertModule(
