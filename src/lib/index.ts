@@ -156,3 +156,24 @@ export const convertModule = (
 };
 
 const fileCache = new Map<string, string>();
+
+const checkProgram = (input: string, output: string) => {
+  const result = convertModule(input, fs.readFileSync(input, 'utf8')).output;
+  fs.writeFileSync(output, result, 'utf8');
+};
+
+const main = () => {
+  const [inFile, outFile] = process.argv.slice(2);
+  if (inFile === undefined || !inFile.endsWith('.ts') ||
+      outFile === undefined || !outFile.endsWith('.soy')) {
+    console.error(`Usage: grimlock input.ts output.soy`);
+    process.exitCode = 1;
+    return;
+  }
+  checkProgram(inFile, outFile);
+};
+
+
+if (require.main === module) {
+  main();
+}

@@ -4,3 +4,4 @@
 /test/*.js.map
 /test/*.d.ts
 /test/*.d.ts.map
+/test/test-files/*.soy
