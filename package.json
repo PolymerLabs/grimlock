@@ -8,7 +8,7 @@
     "build": "tsc",
     "format": "prettier src/**/*.ts --write",
     "test": "jasmine \"test/**/*_test.js\"",
-    "test:sample": "node ./lib/index.js ./test/test-files/template-1.ts"
+    "test:sample": "node ./lib/index.js ./test/test-files/template-1.ts ./test/test-files/template-1.soy"
   },
   "keywords": [],
   "author": "",
