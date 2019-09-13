@@ -14,7 +14,7 @@
 
 import ts from 'typescript';
 import 'jasmine';
-import {convertModule, js} from './test-utils.js';
+import {convertModule, js} from '../lib/index.js';
 
 describe('grimlock', () => {
   describe('SourceFileConverter', () => {
