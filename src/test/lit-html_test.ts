@@ -14,7 +14,7 @@
 
 import 'jasmine';
 
-import {convertModule, js, soy} from './test-utils';
+import {convertModule, js, soy} from '../lib/index.js';
 
 describe('grimlock', () => {
   describe('lit-html', () => {

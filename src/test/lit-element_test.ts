@@ -12,7 +12,7 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {convertModule, js, soy} from './test-utils.js';
+import {convertModule, js, soy} from '../lib/index.js';
 
 describe('grimlock', () => {
   describe('lit-element', () => {
