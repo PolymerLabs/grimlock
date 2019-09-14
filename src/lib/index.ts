@@ -17,6 +17,7 @@ import ts from 'typescript';
 import * as path from 'path';
 import * as fs from 'fs';
 import {stripIndentTag} from '../lib/utils.js';
+import {OverlayLanguageServiceHost} from './overlay-language-service-host.js';
 
 const {WritableStream} = require('memory-streams');
 
@@ -32,70 +33,6 @@ export const soy = stripIndentTag(true);
 
 const packageRoot = path.resolve(__dirname, '../');
 
-class TestLanguageServiceHost implements ts.LanguageServiceHost {
-  files: Map<string, {version: number; source: string}>;
-
-  constructor() {
-    this.files = new Map();
-  }
-
-  getCompilationSettings(): ts.CompilerOptions {
-    return compilerOptions;
-  }
-
-  getScriptFileNames(): string[] {
-    return Array.from(this.files.keys());
-  }
-
-  getScriptVersion(fileName: string) {
-    const file = this.files.get(fileName);
-    return (file === undefined ? -1 : file.version).toString();
-  }
-
-  fileExists(fileName: string): boolean {
-    if (this.files.has(fileName)) {
-      return true;
-    }
-    if (!fileName.startsWith(packageRoot)) {
-      return false;
-    }
-    try {
-      fs.statSync(fileName);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  readFile(fileName: string): string | undefined {
-    if (this.files.has(fileName)) {
-      return this.files.get(fileName)!.source;
-    }
-    let contents = fileCache.get(fileName);
-    if (contents !== undefined) {
-      return contents;
-    }
-    contents = fs.readFileSync(fileName, 'utf-8');
-    fileCache.set(fileName, contents);
-    return contents;
-  }
-
-  getScriptSnapshot(fileName: string): ts.IScriptSnapshot | undefined {
-    if (!this.fileExists(fileName)) {
-      return undefined;
-    }
-    return ts.ScriptSnapshot.fromString(this.readFile(fileName)!);
-  }
-
-  getCurrentDirectory(): string {
-    return __dirname;
-  }
-
-  getDefaultLibFileName(options: ts.CompilerOptions): string {
-    return ts.getDefaultLibFilePath(options);
-  }
-}
-
 const compilerOptions = {
   target: ts.ScriptTarget.ES2017,
   module: ts.ModuleKind.ESNext,
@@ -104,7 +41,11 @@ const compilerOptions = {
   skipLibCheck: true,
 };
 
-const languageServiceHost = new TestLanguageServiceHost();
+const languageServiceHost = new OverlayLanguageServiceHost(
+  packageRoot,
+  compilerOptions
+);
+
 const services = ts.createLanguageService(
   languageServiceHost,
   ts.createDocumentRegistry()
@@ -155,8 +96,6 @@ export const convertModule = (
   };
 };
 
-const fileCache = new Map<string, string>();
-
 const checkProgram = (input: string, output: string) => {
   const result = convertModule(input, fs.readFileSync(input, 'utf8')).output;
   fs.writeFileSync(output, result, 'utf8');
@@ -172,7 +111,6 @@ const main = () => {
   }
   checkProgram(inFile, outFile);
 };
-
 
 if (require.main === module) {
   main();
