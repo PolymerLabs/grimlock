@@ -12,12 +12,19 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {convertModule, js, soy} from '../lib/index.js';
+import 'jasmine';
+
+import * as path from 'path';
+import {Grimlock} from '../lib/grimlock.js';
+import {js, soy} from '../lib/utils.js';
 
 describe('grimlock', () => {
+  const packageRoot = path.resolve(__dirname, '../');
+  const grimlock = new Grimlock(packageRoot);
+
   describe('lit-element', () => {
     it('converts a LitElement', () => {
-      const result = convertModule(
+      const result = grimlock.convertModule(
         'test.ts',
         js`
       import {LitElement, html} from 'lit-element';
@@ -53,7 +60,7 @@ describe('grimlock', () => {
   });
 
   it('converts properties to params', () => {
-    const result = convertModule(
+    const result = grimlock.convertModule(
       'test.ts',
       js`
     import {LitElement, html} from 'lit-element';
@@ -93,7 +100,7 @@ describe('grimlock', () => {
   });
 
   it('supports defined custom elements', () => {
-    const result = convertModule(
+    const result = grimlock.convertModule(
       'test.ts',
       js`
     import {LitElement, html} from 'lit-element';
@@ -143,7 +150,7 @@ describe('grimlock', () => {
   });
 
   it('handles inherited properties', () => {
-    const result = convertModule(
+    const result = grimlock.convertModule(
       'test.ts',
       js`
     import {LitElement, html} from 'lit-element';
@@ -186,7 +193,7 @@ describe('grimlock', () => {
   });
 
   it('errors when referenced property is not decorated with @property()', () => {
-    const result = convertModule(
+    const result = grimlock.convertModule(
       'test.ts',
       js`
     import {LitElement, html} from 'lit-element';
@@ -216,7 +223,7 @@ describe('grimlock', () => {
 
   describe('event bindings', () => {
     it('converts event binding', () => {
-      const result = convertModule(
+      const result = grimlock.convertModule(
         'test.ts',
         js`
       import {LitElement, html} from 'lit-element';
@@ -253,7 +260,7 @@ describe('grimlock', () => {
     });
 
     it('converts event binding with reference to an inherited method', () => {
-      const result = convertModule(
+      const result = grimlock.convertModule(
         'test.ts',
         js`
       import {LitElement, html} from 'lit-element';
@@ -292,7 +299,7 @@ describe('grimlock', () => {
     });
 
     it('does not convert unknown references', () => {
-      const result = convertModule(
+      const result = grimlock.convertModule(
         'test.ts',
         js`
       import {LitElement, html} from 'lit-element';
@@ -329,7 +336,7 @@ describe('grimlock', () => {
     });
 
     it('does not convert event binding that is not an instance method reference.', () => {
-      const result = convertModule(
+      const result = grimlock.convertModule(
         'test.ts',
         js`
       import {LitElement, html} from 'lit-element';

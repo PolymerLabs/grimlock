@@ -14,12 +14,17 @@
 
 import ts from 'typescript';
 import 'jasmine';
-import {convertModule, js} from '../lib/index.js';
+import {js} from '../lib/utils.js';
+import {Grimlock} from '../lib/grimlock.js';
+import * as path from 'path';
 
 describe('grimlock', () => {
+  const packageRoot = path.resolve(__dirname, '../');
+  const grimlock = new Grimlock(packageRoot);
+
   describe('SourceFileConverter', () => {
     it('isImportOf', () => {
-      const {converter} = convertModule(
+      const {converter} = grimlock.convertModule(
         'test.ts',
         js`
       import {html} from 'lit-html';

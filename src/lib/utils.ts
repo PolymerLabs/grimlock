@@ -24,7 +24,16 @@ export const stripIndentTag = (trim: boolean = false) => (
   );
   return trim ? result.trim() : result;
 };
-export const soy = stripIndentTag();
+
+/**
+ * Remove indentation from a template literal containing JavaScript.
+ */
+export const js = stripIndentTag(true);
+
+/**
+ * Remove indentation from a template literal containing Soy.
+ */
+export const soy = stripIndentTag(true);
 
 /**
  * Actions to be executed on nodes during a tree traversal.
