@@ -206,7 +206,9 @@ describe('grimlock', () => {
   `
     );
     expect(result.diagnostics.length).toBeGreaterThan(0);
-    expect(result.diagnostics[0].message).toEqual('referenced properties must be annotated with @property()');
+    expect(result.diagnostics[0].message).toEqual(
+      'referenced properties must be annotated with @property()'
+    );
     expect(() => {
       result.output;
     }).toThrow();
@@ -324,7 +326,7 @@ describe('grimlock', () => {
         <button>Click Me</button>
         {/template}`
       );
-    })
+    });
 
     it('does not convert event binding that is not an instance method reference.', () => {
       const result = convertModule(
@@ -345,7 +347,9 @@ describe('grimlock', () => {
     `
       );
       expect(result.diagnostics.length).toBeGreaterThan(0);
-      expect(result.diagnostics[0].message).toContain('event bindings must be instance method references: console.log');
+      expect(result.diagnostics[0].message).toContain(
+        'event bindings must be instance method references: console.log'
+      );
       expect(result.output).toEqual(
         soy`
         {namespace test.ts}

@@ -32,13 +32,16 @@ export const soy = stripIndentTag();
 export type TraverseActions = {
   pre: (node: parse5.AST.Default.Node) => void;
   post: (node: parse5.AST.Default.Node) => void;
-}
+};
 
 /**
  * Perform a tree traversal starting at the given node. Execute
  * pre-order and post-order actions on each node.
  */
-export const traverseHtml = (node: parse5.AST.Node, actions: TraverseActions) => {
+export const traverseHtml = (
+  node: parse5.AST.Node,
+  actions: TraverseActions
+) => {
   actions.pre(node as parse5.AST.Default.Node);
   if ((node as parse5.AST.Default.ParentNode).childNodes) {
     for (const child of (node as parse5.AST.Default.ParentNode).childNodes) {
@@ -46,4 +49,4 @@ export const traverseHtml = (node: parse5.AST.Node, actions: TraverseActions) =>
     }
   }
   actions.post(node as parse5.AST.Default.Node);
-}
+};
