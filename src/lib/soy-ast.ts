@@ -12,10 +12,8 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {Writable} from 'stream';
-
 export abstract class Node {
-  abstract emit(writer: Writable): void;
+  abstract emit(): IterableIterator<string>;
 }
 
 export abstract class Expression extends Node {}
@@ -28,8 +26,10 @@ export class File implements Node {
     this.commands = commands;
   }
 
-  emit(writer: Writable) {
-    this.commands.forEach((c) => c.emit(writer));
+  *emit() {
+    for (const command of this.commands) {
+      yield* command.emit();
+    }
   }
 }
 
@@ -41,8 +41,8 @@ export class Namespace extends Command {
     this.value = value;
   }
 
-  emit(writer: Writable) {
-    writer.write(`{namespace ${this.value}}\n`);
+  *emit() {
+    yield `{namespace ${this.value}}\n`;
   }
 }
 
@@ -56,10 +56,12 @@ export class Template extends Command {
     this.commands = commands;
   }
 
-  emit(writer: Writable) {
-    writer.write(`\n{template .${this.name}}\n`);
-    this.commands.forEach((c) => c.emit(writer));
-    writer.write(`\n{/template}\n`);
+  *emit() {
+    yield `\n{template .${this.name}}\n`;
+    for (const command of this.commands) {
+      yield* command.emit();
+    }
+    yield `\n{/template}\n`;
   }
 }
 
@@ -73,9 +75,9 @@ export class TemplateParameter extends Command {
     this.type = type;
   }
 
-  emit(writer: Writable) {
+  *emit() {
     const typeString = this.type === undefined ? '' : `: ${this.type}`;
-    writer.write(`  {@param ${this.name}${typeString}}\n`);
+    yield `  {@param ${this.name}${typeString}}\n`;
   }
 }
 
@@ -87,8 +89,8 @@ export class RawText extends Command {
     this.value = value;
   }
 
-  emit(writer: Writable) {
-    writer.write(this.value);
+  *emit() {
+    yield this.value;
   }
 }
 
@@ -100,10 +102,10 @@ export class Print extends Command {
     this.child = child;
   }
 
-  emit(writer: Writable) {
-    writer.write('{');
-    this.child.emit(writer);
-    writer.write('}');
+  *emit() {
+    yield '{';
+    yield* this.child.emit();
+    yield '}';
   }
 }
 
@@ -115,8 +117,10 @@ export class Block extends Command {
     this.children = children;
   }
 
-  emit(writer: Writable) {
-    this.children.forEach((c) => c.emit(writer));
+  *emit() {
+    for (const child of this.children) {
+      yield* child.emit();
+    }
   }
 }
 
@@ -132,16 +136,16 @@ export class CallParameter extends Command {
     this.kind = kind;
   }
 
-  emit(writer: Writable) {
+  *emit() {
     if (this.value instanceof Expression) {
-      writer.write(`{param ${this.name}: `);
-      this.value.emit(writer);
-      writer.write(` /}`);
+      yield `{param ${this.name}: `;
+      yield* this.value.emit();
+      yield ` /}`;
     } else {
       const kindString = this.kind === undefined ? '' : ` kind="${this.kind}"`;
-      writer.write(`\n{param ${this.name}${kindString}}`);
-      this.value.emit(writer);
-      writer.write(`\n{/param}`);
+      yield `\n{param ${this.name}${kindString}}`;
+      yield* this.value.emit();
+      yield `\n{/param}`;
     }
   }
 }
@@ -156,13 +160,15 @@ export class CallCommand extends Command {
     this.parameters = parameters;
   }
 
-  emit(writer: Writable) {
+  *emit() {
     const hasParameters = this.parameters.length !== 0;
     const selfClose = hasParameters ? '' : ' /';
-    writer.write(`{call .${this.templateName}${selfClose}}`);
-    this.parameters.forEach((p) => p.emit(writer));
+    yield `{call .${this.templateName}${selfClose}}`;
+    for (const parameter of this.parameters) {
+      yield* parameter.emit();
+    }
     if (hasParameters) {
-      writer.write(`\n{/call}`);
+      yield `\n{/call}`;
     }
   }
 }
@@ -183,14 +189,18 @@ export class IfCommand extends Command {
     this.whenFalse = whenFalse;
   }
 
-  emit(writer: Writable) {
-    writer.write('\n{if ');
-    this.condition.emit(writer);
-    writer.write('}\n');
-    this.whenTrue.forEach((c) => c.emit(writer));
-    writer.write('\n{else}\n');
-    this.whenFalse.forEach((c) => c.emit(writer));
-    writer.write('\n{/if}\n');
+  *emit() {
+    yield '\n{if ';
+    yield* this.condition.emit();
+    yield '}\n';
+    for (const c of this.whenTrue) {
+      yield* c.emit();
+    }
+    yield '\n{else}\n';
+    for (const c of this.whenFalse) {
+      yield* c.emit();
+    }
+    yield '\n{/if}\n';
   }
 }
 
@@ -206,12 +216,14 @@ export class ForCommand extends Command {
     this.body = body;
   }
 
-  emit(writer: Writable) {
-    writer.write(`\n{for $${this.identifier} in `);
-    this.expression.emit(writer);
-    writer.write('}\n');
-    this.body.forEach((c) => c.emit(writer));
-    writer.write('\n{/for}\n');
+  *emit() {
+    yield `\n{for $${this.identifier} in `;
+    yield* this.expression.emit();
+    yield '}\n';
+    for (const command of this.body) {
+      yield* command.emit();
+    }
+    yield '\n{/for}\n';
   }
 }
 
@@ -227,16 +239,16 @@ export class LetCommand extends Command {
     this.kind = kind;
   }
 
-  emit(writer: Writable) {
+  *emit() {
     if (this.value instanceof Expression) {
-      writer.write(`\n{let $${this.identifier}: `);
-      this.value.emit(writer);
-      writer.write(' /}\n');
+      yield `\n{let $${this.identifier}: `;
+      yield* this.value.emit();
+      yield ' /}\n';
     } else {
       const kindString = this.kind === undefined ? '' : ` kind="${this.kind}"`;
-      writer.write(`\n{let $${this.identifier}${kindString}}\n`);
-      this.value.emit(writer);
-      writer.write('\n{/let}\n');
+      yield `\n{let $${this.identifier}${kindString}}\n`;
+      yield* this.value.emit();
+      yield '\n{/let}\n';
     }
   }
 }
@@ -249,8 +261,8 @@ export abstract class Literal extends Expression {
     this.text = value;
   }
 
-  emit(writer: Writable) {
-    writer.write(this.text);
+  *emit() {
+    yield this.text;
   }
 }
 
@@ -274,9 +286,9 @@ export class Identifier extends Expression {
     this.value = value;
   }
 
-  emit(writer: Writable) {
-    writer.write('$');
-    writer.write(this.value);
+  *emit() {
+    yield '$';
+    yield this.value;
   }
 }
 
@@ -290,9 +302,9 @@ export class UnaryOperator extends Expression {
     this.child = child;
   }
 
-  emit(writer: Writable) {
-    writer.write(this.operator);
-    this.child.emit(writer);
+  *emit() {
+    yield this.operator;
+    yield* this.child.emit();
   }
 }
 
@@ -308,10 +320,10 @@ export class BinaryOperator extends Expression {
     this.right = right;
   }
 
-  emit(writer: Writable) {
-    this.left.emit(writer);
-    writer.write(` ${this.operator} `);
-    this.right.emit(writer);
+  *emit() {
+    yield* this.left.emit();
+    yield ` ${this.operator} `;
+    yield* this.right.emit();
   }
 }
 
@@ -325,10 +337,10 @@ export class PropertyAccess extends Expression {
     this.name = name;
   }
 
-  emit(writer: Writable) {
-    this.receiver.emit(writer);
-    writer.write('.');
-    writer.write(this.name);
+  *emit() {
+    yield* this.receiver.emit();
+    yield '.';
+    yield this.name;
   }
 }
 
@@ -342,21 +354,22 @@ export class CallExpression extends Expression {
     this.arguments = args;
   }
 
-  emit(writer: Writable) {
-    writer.write(this.functionName);
-    writer.write('(');
-    this.arguments.forEach((a, i) => {
-      a.emit(writer);
-      if (i < this.arguments.length - 1) {
-        writer.write(', ');
+  *emit() {
+    yield this.functionName;
+    yield '(';
+    let i = 0;
+    for (const argument of this.arguments) {
+      yield* argument.emit();
+      if (i++ < this.arguments.length - 1) {
+        yield ', ';
       }
-    });
-    writer.write(')');
+    }
+    yield ')';
   }
 }
 
 export class ErrorExpression extends Expression {
-  emit(_writer: Writable) {
+  *emit() {
     throw new Error('Cannot emit Empty Soy nodes');
   }
 }
@@ -369,10 +382,10 @@ export class Paren extends Expression {
     this.child = child;
   }
 
-  emit(writer: Writable) {
-    writer.write('(');
-    this.child.emit(writer);
-    writer.write(')');
+  *emit() {
+    yield '(';
+    yield* this.child.emit();
+    yield ')';
   }
 }
 
@@ -386,11 +399,11 @@ export class Index extends Expression {
     this.argument = argument;
   }
 
-  emit(writer: Writable) {
-    this.receiver.emit(writer);
-    writer.write('[');
-    this.argument.emit(writer);
-    writer.write(']');
+  *emit() {
+    yield* this.receiver.emit();
+    yield '[';
+    yield* this.argument.emit();
+    yield ']';
   }
 }
 
@@ -409,12 +422,12 @@ export class Ternary {
     this.falseExpr = falseExpr;
   }
 
-  emit(writer: Writable) {
-    this.condition.emit(writer);
-    writer.write(' ? ');
-    this.trueExpr.emit(writer);
-    writer.write(' : ');
-    this.falseExpr.emit(writer);
+  *emit() {
+    yield* this.condition.emit();
+    yield ' ? ';
+    yield* this.trueExpr.emit();
+    yield ' : ';
+    yield* this.falseExpr.emit();
   }
 }
 
@@ -426,15 +439,16 @@ export class Record extends Expression {
     this.entries = entries;
   }
 
-  emit(writer: Writable) {
-    writer.write('record(');
-    this.entries.forEach(([key, value], i) => {
-      writer.write(`${key}: `);
-      value.emit(writer);
-      if (i < this.entries.length - 1) {
-        writer.write(', ');
+  *emit() {
+    yield 'record(';
+    let i = 0;
+    for (const [key, value] of this.entries) {
+      yield `${key}: `;
+      yield* value.emit();
+      if (i++ < this.entries.length - 1) {
+        yield ', ';
       }
-    });
-    writer.write(')');
+    }
+    yield ')';
   }
 }

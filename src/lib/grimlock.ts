@@ -17,8 +17,6 @@ import ts from 'typescript';
 import {SourceFileConverter} from './source-file-converter.js';
 import {OverlayLanguageServiceHost} from './overlay-language-service-host.js';
 
-const {WritableStream} = require('memory-streams');
-
 const compilerOptions = {
   target: ts.ScriptTarget.ES2017,
   module: ts.ModuleKind.ESNext,
@@ -79,9 +77,11 @@ export class Grimlock {
     return {
       ast,
       get output() {
-        const writer = new WritableStream();
-        ast.emit(writer);
-        return writer.toString().trim();
+        let output = '';
+        for (const s of ast.emit()) {
+          output += s;
+        }
+        return output.trim();
       },
       diagnostics: converter.diagnostics,
       converter,
