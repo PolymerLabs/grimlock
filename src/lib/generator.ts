@@ -30,4 +30,5 @@ export interface OutputFile {
 export type Generator = (
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
-  rootDir: string) => Array<OutputFile>;
+  rootDir: string
+) => Array<OutputFile>;

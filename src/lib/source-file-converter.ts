@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
-import {getReflectedAttributeName} from './reflected-attribute-name.js'
+import {getReflectedAttributeName} from './reflected-attribute-name.js';
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -356,8 +356,7 @@ export class SourceFileConverter {
     const template = templateLiteral.template as ts.TemplateLiteral;
     const marker = '{{-lit-html-}}';
     const markerRegex = /{{-lit-html-}}/g;
-    const lastAttributeNameRegex =
-      /([ \x09\x0a\x0c\x0d])([^\0-\x1F\x7F-\x9F "'>=/]+)([ \x09\x0a\x0c\x0d]*=[ \x09\x0a\x0c\x0d]*(?:[^ \x09\x0a\x0c\x0d"'`<>=]*|"[^"]*|'[^']*))$/;
+    const lastAttributeNameRegex = /([ \x09\x0a\x0c\x0d])([^\0-\x1F\x7F-\x9F "'>=/]+)([ \x09\x0a\x0c\x0d]*=[ \x09\x0a\x0c\x0d]*(?:[^ \x09\x0a\x0c\x0d"'`<>=]*|"[^"]*|'[^']*))$/;
 
     const strings: string[] = ts.isNoSubstitutionTemplateLiteral(template)
       ? [template.text]
@@ -412,9 +411,14 @@ export class SourceFileConverter {
           for (let {name, value} of node.attrs) {
             if (name.startsWith('.')) {
               // Need to get name from source to ensure proper casing.
-              const attributeName = lastAttributeNameRegex.exec(strings[partTypes.length])![2];
+              const attributeName = lastAttributeNameRegex.exec(
+                strings[partTypes.length]
+              )![2];
               const propertyName = attributeName.slice(1);
-              const reflectedAttributeName = getReflectedAttributeName(propertyName, node.tagName);
+              const reflectedAttributeName = getReflectedAttributeName(
+                propertyName,
+                node.tagName
+              );
               if (reflectedAttributeName !== undefined) {
                 name = reflectedAttributeName;
               } else {
@@ -425,14 +429,15 @@ export class SourceFileConverter {
               const listenerExpression = expressions[partTypes.length];
               partTypes.push('attribute');
               const eventType = name.slice(1);
-              const listenerCommand = this.convertListenerExpression(listenerExpression, eventType);
+              const listenerCommand = this.convertListenerExpression(
+                listenerExpression,
+                eventType
+              );
               if (listenerCommand !== undefined) {
                 commands.push(listenerCommand);
               }
               continue;
-            } else if (
-              name.startsWith('?')
-            ) {
+            } else if (name.startsWith('?')) {
               // TODO: this likely shouldn't be a warning. Not rendering all
               // attribute-position bindings is how things will just work, but
               // this isn't developed out yet, so make a warning for now.
@@ -442,7 +447,7 @@ export class SourceFileConverter {
               );
               partTypes.push('attribute');
               continue;
-            } 
+            }
             const textLiterals = value.split(markerRegex);
             commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
             for (const textLiteral of textLiterals.slice(1)) {
@@ -480,7 +485,10 @@ export class SourceFileConverter {
   /**
    * Convert event binding into a jsaction.
    */
-  convertListenerExpression(node: ts.Expression, eventType: string): ast.Command | undefined {
+  convertListenerExpression(
+    node: ts.Expression,
+    eventType: string
+  ): ast.Command | undefined {
     const symbol = this.checker.getSymbolAtLocation(node);
 
     // Referenced method is not in scope.
@@ -491,8 +499,10 @@ export class SourceFileConverter {
 
     // Referenced method is not an instance method.
     if (
-      !(ts.isPropertyAccessExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ThisKeyword)
+      !(
+        ts.isPropertyAccessExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ThisKeyword
+      )
     ) {
       this.report(
         node,
@@ -501,7 +511,9 @@ export class SourceFileConverter {
       return;
     }
 
-    return new ast.RawText(` jsaction="${eventType}:{xid('${symbol.getName()}')}"`);
+    return new ast.RawText(
+      ` jsaction="${eventType}:{xid('${symbol.getName()}')}"`
+    );
   }
 
   /*
@@ -736,8 +748,14 @@ export class SourceFileConverter {
             this.report(node, 'unknown class property');
             return new ast.ErrorExpression();
           }
-          if (!this.isLitElementProperty(symbol.declarations[0] as ts.PropertyDeclaration)) {
-            this.report(node, 'referenced properties must be annotated with @property()');
+          if (
+            !this.isLitElementProperty(symbol
+              .declarations[0] as ts.PropertyDeclaration)
+          ) {
+            this.report(
+              node,
+              'referenced properties must be annotated with @property()'
+            );
             return new ast.ErrorExpression();
           }
           return new ast.Identifier(symbol.name);
@@ -826,15 +844,18 @@ export class SourceFileConverter {
     if (parentType.expression.getText() === 'LitElement') {
       return [node];
     }
-    const parentDeclaration = this.checker.getTypeFromTypeNode(parentType).symbol.declarations[0] as ts.ClassDeclaration;
+    const parentDeclaration = this.checker.getTypeFromTypeNode(parentType)
+      .symbol.declarations[0] as ts.ClassDeclaration;
     return [node].concat(this.getHeritage(parentDeclaration));
   }
 
   getLitElementProperties(node: ts.ClassDeclaration) {
-    return this.getHeritage(node).map((node) => node.members)
+    return this.getHeritage(node)
+      .map((node) => node.members)
       .reduce((acc, cur) => ts.createNodeArray(acc.concat(cur)))
-      .filter((m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
-    ) as ts.PropertyDeclaration[];
+      .filter(
+        (m) => ts.isPropertyDeclaration(m) && this.isLitElementProperty(m)
+      ) as ts.PropertyDeclaration[];
   }
 
   isInScope(node: ts.Identifier, scope: TemplateScope) {
