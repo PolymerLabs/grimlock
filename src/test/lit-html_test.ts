@@ -14,14 +14,19 @@
 
 import 'jasmine';
 
-import {convertModule, js, soy} from '../lib/index.js';
+import * as path from 'path';
+import {Grimlock} from '../lib/grimlock.js';
+import {js, soy} from '../lib/utils.js';
 
 describe('grimlock', () => {
+  const packageRoot = path.resolve(__dirname, '../');
+  const grimlock = new Grimlock(packageRoot);
+
   describe('lit-html', () => {
     describe('template function declaration', () => {
       it('simple declaration', () => {
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
                 import {html} from 'lit-html';
@@ -45,7 +50,7 @@ describe('grimlock', () => {
         // Documenting current behavior. Perhaps we shold error with
         // "nothing to translate"
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
                 import {html} from 'lit-html';
@@ -57,7 +62,7 @@ describe('grimlock', () => {
       });
 
       it('incorrect html tag', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           /**
@@ -74,7 +79,7 @@ describe('grimlock', () => {
 
       it('parameters and text expression', () => {
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
           import {html} from 'lit-html';
@@ -100,7 +105,7 @@ describe('grimlock', () => {
 
       it('parameters and attribute expression', () => {
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
           import {html} from 'lit-html';
@@ -131,7 +136,7 @@ describe('grimlock', () => {
       // - event bindings such as `.onclick`
       it('reflecting property expressions', () => {
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
                 import {html} from 'lit-html';
@@ -154,7 +159,7 @@ describe('grimlock', () => {
       });
 
       it('error on unsupported statements', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -186,7 +191,7 @@ describe('grimlock', () => {
     describe('expressions', () => {
       it('subtemplate call', () => {
         expect(
-          convertModule(
+          grimlock.convertModule(
             'test.ts',
             js`
           import {html} from 'lit-html';
@@ -216,7 +221,7 @@ describe('grimlock', () => {
       });
 
       it('error on unknown reference', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -236,7 +241,7 @@ describe('grimlock', () => {
       });
 
       it('references to parameters', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -278,7 +283,7 @@ describe('grimlock', () => {
           op = op[0];
         }
         it(`binary ${op} operator`, () => {
-          const result = convertModule(
+          const result = grimlock.convertModule(
             'test.ts',
             js`
             import {html} from 'lit-html';
@@ -303,7 +308,7 @@ describe('grimlock', () => {
       }
 
       it('text ternary', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
         import {html} from 'lit-html';
@@ -336,7 +341,7 @@ describe('grimlock', () => {
       });
 
       it('expression ternary', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
         import {html} from 'lit-html';
@@ -360,7 +365,7 @@ describe('grimlock', () => {
       });
 
       it(`error on strict equality`, () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -381,7 +386,7 @@ describe('grimlock', () => {
       });
 
       it('Array.length', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -404,7 +409,7 @@ describe('grimlock', () => {
       });
 
       it('String.length', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -427,7 +432,7 @@ describe('grimlock', () => {
       });
 
       it('String.includes()', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
           import {html} from 'lit-html';
@@ -450,7 +455,7 @@ describe('grimlock', () => {
       });
 
       it('Array.map', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
             import {html} from 'lit-html';
@@ -484,7 +489,7 @@ describe('grimlock', () => {
       });
 
       it('Array.map with free variables', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
             import {html} from 'lit-html';
@@ -525,7 +530,7 @@ describe('grimlock', () => {
       });
 
       it('variable declarations', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
             import {html} from 'lit-html';
@@ -551,7 +556,7 @@ describe('grimlock', () => {
       });
 
       it('object literals', () => {
-        const result = convertModule(
+        const result = grimlock.convertModule(
           'test.ts',
           js`
             import {html} from 'lit-html';

@@ -11,8 +11,8 @@
  * subject to an additional IP rights grant found at
  * http://polymer.github.io/PATENTS.txt
  */
-import ts from 'typescript';
 import * as fs from 'fs';
+import ts from 'typescript';
 
 /**
  * A LanguageServiceHost that overlays a versioned in-memory file collection
