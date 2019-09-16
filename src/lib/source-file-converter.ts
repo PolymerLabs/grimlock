@@ -637,145 +637,176 @@ export class SourceFileConverter {
       case ts.SyntaxKind.NullKeyword:
       case ts.SyntaxKind.UndefinedKeyword:
         return new ast.NullLiteral();
-      case ts.SyntaxKind.ObjectLiteralExpression: {
-        const obj = node as ts.ObjectLiteralExpression;
-        const entries: Array<[string, ast.Expression]> = obj.properties.map(
-          (p) => {
-            if (ts.isPropertyAssignment(p)) {
-              const name = p.name.getText();
-              const value = p.initializer;
-              return [name, this.convertExpression(value, scope)];
-            } else {
-              this.report(p, 'unsupported object literal member');
-              return ['', new ast.ErrorExpression()];
-            }
-          }
+      case ts.SyntaxKind.ObjectLiteralExpression:
+        return this.convertObjectLiteralExpression(
+          node as ts.ObjectLiteralExpression,
+          scope
         );
-        return new ast.Record(entries);
-      }
       case ts.SyntaxKind.TaggedTemplateExpression:
         this.report(node, 'template are not supported here');
         break;
-      case ts.SyntaxKind.CallExpression: {
-        const call = node as ts.CallExpression;
-        const func = call.expression;
-        const funcSymbol = this.checker.getSymbolAtLocation(func);
-        const funcDeclaration = funcSymbol && funcSymbol.declarations[0];
-
-        // Rewrite String.contains.
-        // TODO: move this to a lookup
-        if (
-          funcDeclaration &&
-          funcDeclaration === this._stringIncludesSymbol.declarations[0]
-        ) {
-          if (!ts.isPropertyAccessExpression(func)) {
-            this.report(call, 'String#includes must be called as a method');
-            return new ast.ErrorExpression();
-          }
-          const receiver = func.expression;
-          const args = call.arguments;
-          if (args.length !== 1) {
-            this.report(
-              call,
-              'only one argument is allowed to String#includes()'
-            );
-            return new ast.ErrorExpression();
-          }
-          const arg = args[0];
-          return new ast.CallExpression('strContains', [
-            this.convertExpression(receiver, scope),
-            this.convertExpression(arg, scope),
-          ]);
-        }
-        this.report(node, `unsupported call`);
-        return new ast.ErrorExpression();
-      }
-      case ts.SyntaxKind.BinaryExpression: {
-        const operator = (node as ts.BinaryExpression).operatorToken;
-        const soyOperator = this.getSoyBinaryOperator(operator);
-        if (soyOperator !== undefined) {
-          const left = this.convertExpression(
-            (node as ts.BinaryExpression).left,
-            scope
-          );
-          const right = this.convertExpression(
-            (node as ts.BinaryExpression).right,
-            scope
-          );
-          return new ast.BinaryOperator(soyOperator, left, right);
-        }
-        return new ast.ErrorExpression();
-      }
+      case ts.SyntaxKind.CallExpression:
+        return this.convertCallExpression(node as ts.CallExpression, scope);
+      case ts.SyntaxKind.BinaryExpression:
+        return this.convertBinaryExpression(node as ts.BinaryExpression, scope);
       case ts.SyntaxKind.ConditionalExpression:
-        return new ast.Ternary(
-          this.convertExpression(
-            (node as ts.ConditionalExpression).condition,
-            scope
-          ),
-          this.convertExpression(
-            (node as ts.ConditionalExpression).whenTrue,
-            scope
-          ),
-          this.convertExpression(
-            (node as ts.ConditionalExpression).whenFalse,
-            scope
-          )
+        return this.convertConditionalExpression(
+          node as ts.ConditionalExpression,
+          scope
         );
-      case ts.SyntaxKind.PrefixUnaryExpression: {
-        const soyOperator = this.getSoyUnaryOperator(
-          node as ts.PrefixUnaryExpression
+      case ts.SyntaxKind.PrefixUnaryExpression:
+        return this.convertPrefixUnaryExpression(
+          node as ts.PrefixUnaryExpression,
+          scope
         );
-        if (soyOperator !== undefined) {
-          return new ast.UnaryOperator(
-            soyOperator,
-            this.convertExpression(
-              (node as ts.PrefixUnaryExpression).operand,
-              scope
-            )
-          );
-        }
-        return new ast.ErrorExpression();
-      }
-      case ts.SyntaxKind.PropertyAccessExpression: {
-        const receiver = (node as ts.PropertyAccessExpression).expression;
-        if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
-          if (scope.element === undefined) {
-            this.report(node, 'this keyword outside of a LitElement');
-            return new ast.ErrorExpression();
-          }
-          const symbol = this.checker.getSymbolAtLocation(node);
-          if (symbol === undefined) {
-            this.report(node, 'unknown class property');
-            return new ast.ErrorExpression();
-          }
-          if (
-            !this.isLitElementProperty(symbol
-              .declarations[0] as ts.PropertyDeclaration)
-          ) {
-            this.report(
-              node,
-              'referenced properties must be annotated with @property()'
-            );
-            return new ast.ErrorExpression();
-          }
-          return new ast.Identifier(symbol.name);
-        }
-
+      case ts.SyntaxKind.PropertyAccessExpression:
         return this.convertPropertyAccessExpression(
           node as ts.PropertyAccessExpression,
           scope
         );
-      }
     }
     this.report(node, `unsupported expression: ${node.getText()}`);
     return new ast.ErrorExpression();
   }
 
+  /**
+   * Converts a prefix unary expression to an AST expression.
+   */
+  convertPrefixUnaryExpression(
+    node: ts.PrefixUnaryExpression,
+    scope: TemplateScope
+  ): ast.Expression {
+    const soyOperator = this.getSoyUnaryOperator(node);
+    if (soyOperator !== undefined) {
+      return new ast.UnaryOperator(
+        soyOperator,
+        this.convertExpression(node.operand, scope)
+      );
+    }
+    return new ast.ErrorExpression();
+  }
+
+  /**
+   * Converts a conditional expression to an AST expression.
+   */
+  convertConditionalExpression(
+    node: ts.ConditionalExpression,
+    scope: TemplateScope
+  ): ast.Expression {
+    return new ast.Ternary(
+      this.convertExpression(node.condition, scope),
+      this.convertExpression(node.whenTrue, scope),
+      this.convertExpression(node.whenFalse, scope)
+    );
+  }
+
+  /**
+   * Converts a binary expression to an AST expression.
+   */
+  convertBinaryExpression(
+    node: ts.BinaryExpression,
+    scope: TemplateScope
+  ): ast.Expression {
+    const operator = node.operatorToken;
+    const soyOperator = this.getSoyBinaryOperator(operator);
+    if (soyOperator !== undefined) {
+      const left = this.convertExpression(node.left, scope);
+      const right = this.convertExpression(node.right, scope);
+      return new ast.BinaryOperator(soyOperator, left, right);
+    }
+    return new ast.ErrorExpression();
+  }
+
+  /**
+   * Converts a call expression to an AST expression.
+   */
+  convertCallExpression(
+    node: ts.CallExpression,
+    scope: TemplateScope
+  ): ast.Expression {
+    const func = node.expression;
+    const funcSymbol = this.checker.getSymbolAtLocation(func);
+    const funcDeclaration = funcSymbol && funcSymbol.declarations[0];
+
+    // Rewrite String.contains.
+    // TODO: move this to a lookup
+    if (
+      funcDeclaration &&
+      funcDeclaration === this._stringIncludesSymbol.declarations[0]
+    ) {
+      if (!ts.isPropertyAccessExpression(func)) {
+        this.report(node, 'String#includes must be called as a method');
+        return new ast.ErrorExpression();
+      }
+      const receiver = func.expression;
+      const args = node.arguments;
+      if (args.length !== 1) {
+        this.report(node, 'only one argument is allowed to String#includes()');
+        return new ast.ErrorExpression();
+      }
+      const arg = args[0];
+      return new ast.CallExpression('strContains', [
+        this.convertExpression(receiver, scope),
+        this.convertExpression(arg, scope),
+      ]);
+    }
+    this.report(node, `unsupported call`);
+    return new ast.ErrorExpression();
+  }
+
+  /**
+   * Converts an object literal expression to an AST expression.
+   */
+  convertObjectLiteralExpression(
+    node: ts.ObjectLiteralExpression,
+    scope: TemplateScope
+  ): ast.Expression {
+    const entries: Array<[string, ast.Expression]> = node.properties.map(
+      (p) => {
+        if (ts.isPropertyAssignment(p)) {
+          const name = p.name.getText();
+          const value = p.initializer;
+          return [name, this.convertExpression(value, scope)];
+        } else {
+          this.report(p, 'unsupported object literal member');
+          return ['', new ast.ErrorExpression()];
+        }
+      }
+    );
+    return new ast.Record(entries);
+  }
+
+  /**
+   * Converts a property access expression to an AST expression.
+   */
   convertPropertyAccessExpression(
     node: ts.PropertyAccessExpression,
     scope: TemplateScope
   ): ast.Expression {
-    const receiver = (node as ts.PropertyAccessExpression).expression;
+    const receiver = node.expression;
+    if (receiver.kind === ts.SyntaxKind.ThisKeyword) {
+      if (scope.element === undefined) {
+        this.report(node, 'this keyword outside of a LitElement');
+        return new ast.ErrorExpression();
+      }
+      const symbol = this.checker.getSymbolAtLocation(node);
+      if (symbol === undefined) {
+        this.report(node, 'unknown class property');
+        return new ast.ErrorExpression();
+      }
+      if (
+        !this.isLitElementProperty(symbol
+          .declarations[0] as ts.PropertyDeclaration)
+      ) {
+        this.report(
+          node,
+          'referenced properties must be annotated with @property()'
+        );
+        return new ast.ErrorExpression();
+      }
+      return new ast.Identifier(symbol.name);
+    }
+
     const receiverType = this.checker.getTypeAtLocation(receiver);
     const name = (node as ts.PropertyAccessExpression).name.getText();
 
