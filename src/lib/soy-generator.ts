@@ -1051,14 +1051,18 @@ export class SoyConverter {
    * traverse and convert the type AST here. For now we'll use some simple
    * assignability checks.
    *
-   * @param node A node like a ParameterDeclaration that has a .type property.
+   * @param node A NamedDeclaration node. This will be a ParameterDeclaration
+   *     when checking the type of a parameter of a top-level lit-html
+   *     template function, or a PropertyDeclaration when checking the type
+   *     of a LitElement class property.
    */
-  getSoyTypeOfNode(node: ts.HasType): string | undefined {
-    const typeNode = node.type;
-    if (typeNode === undefined) {
+  getSoyTypeOfNode(node: ts.NamedDeclaration): string | undefined {
+    const symbol = this.checker.getSymbolAtLocation(node.name!);
+    if (symbol === undefined) {
+      this.report(node, 'unknown type');
       return undefined;
     }
-    const type = this.checker.getTypeAtLocation(typeNode);
+    const type = this.checker.getTypeOfSymbolAtLocation(symbol, node);
     const soyType = this.getSoyType(type);
     if (soyType === undefined) {
       this.report(node, 'unknown type');
