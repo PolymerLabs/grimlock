@@ -54,7 +54,6 @@ export class Grimlock {
     this.languageServiceHost.files.set(testPath, {version, source});
 
     const program = this.languageService.getProgram()!;
-    const checker = program.getTypeChecker();
     const sourceFile = program.getSourceFile(testPath)!;
 
     const diagnostics = program.getSyntacticDiagnostics(sourceFile);
@@ -69,7 +68,8 @@ export class Grimlock {
       definedElements && new Map(Object.entries(definedElements));
     const converter = new SourceFileConverter(
       sourceFile,
-      checker,
+      program,
+      this.languageServiceHost,
       __dirname,
       definedElementsMap
     );

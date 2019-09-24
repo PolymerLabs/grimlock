@@ -12,7 +12,7 @@
  * http://polymer.github.io/PATENTS.txt
  */
 
-import {LitElement, html} from 'lit-element';
+import {LitElement, html, customElement} from 'lit-element';
 
 /**
  * @soyCompatible
@@ -30,7 +30,8 @@ export const testTemplate = (name: string) => html`
 /**
  * @soyCompatible
  */
-export class TestElement extends LitElement {
+@customElement('test-element')
+export class TestElement extends LitElement {  
   render() {
     return html`<p>Cool, cool, cool...</p>`;
   }
