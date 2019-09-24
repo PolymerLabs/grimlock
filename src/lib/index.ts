@@ -15,25 +15,27 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {Grimlock} from './grimlock.js';
+import {SourceFileGenerator} from './source-file-generator.js';
 
 const packageRoot = path.resolve(__dirname, '../');
 
 const main = () => {
-  const [inFile, outFile] = process.argv.slice(2);
+  const [inFile] = process.argv.slice(2);
   if (
     inFile === undefined ||
-    !inFile.endsWith('.ts') ||
-    outFile === undefined ||
-    !outFile.endsWith('.soy')
+    !inFile.endsWith('.ts')
   ) {
-    console.error(`Usage: grimlock input.ts output.soy`);
+    console.error(`Usage: grimlock input.ts`);
     process.exitCode = 1;
     return;
   }
-  const grimlock = new Grimlock(packageRoot);
+  const grimlock = new Grimlock(packageRoot, [SourceFileGenerator]);
   const input = fs.readFileSync(inFile, 'utf8');
-  const output = grimlock.convertModule(inFile, input).output;
-  fs.writeFileSync(outFile, output, 'utf8');
+  const outputFiles = grimlock.convertModule(inFile, input).files;
+  for (const file of outputFiles) {
+    const outputFilePath = path.relative(__dirname, file.filename);
+    fs.writeFileSync(outputFilePath, file.content, 'utf8');
+  }
 };
 
 if (require.main === module) {

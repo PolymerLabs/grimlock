@@ -16,11 +16,12 @@ import 'jasmine';
 
 import * as path from 'path';
 import {Grimlock} from '../lib/grimlock.js';
+import {SourceFileGenerator} from '../lib/source-file-generator.js';
 import {js, soy} from '../lib/utils.js';
 
 describe('grimlock', () => {
   const packageRoot = path.resolve(__dirname, '../');
-  const grimlock = new Grimlock(packageRoot);
+  const grimlock = new Grimlock(packageRoot, [SourceFileGenerator]);
 
   describe('lit-html', () => {
     describe('template function declaration', () => {
@@ -36,7 +37,7 @@ describe('grimlock', () => {
                  */
                 export const t = () => html\`<div></div>\`;
                         `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
                 {namespace test.ts}
 
@@ -55,7 +56,7 @@ describe('grimlock', () => {
             js`
                 import {html} from 'lit-html';
               `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
                 {namespace test.ts}
               `);
@@ -93,7 +94,7 @@ describe('grimlock', () => {
           export const t = (a: string, b: number, c: boolean) => 
               html\`<div>\${a}\${b}\${c}</div>\`;
         `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
           {namespace test.ts}
 
@@ -119,7 +120,7 @@ describe('grimlock', () => {
           export const t = (a: string, b: number, c: boolean) => 
               html\`<div class=\${a} .foo=\${b}>\${c}</div>\`;
         `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
           {namespace test.ts}
 
@@ -151,7 +152,7 @@ describe('grimlock', () => {
                   return html\`<input .value=\${"foo"} .className=\${"bar"}>\`
                 };
               `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
                 {namespace test.ts}
 
@@ -209,7 +210,7 @@ describe('grimlock', () => {
            */
           export const t1 = () => html\`<div></div>\`;
         `
-          ).output
+          ).files[0].content
         ).toEqual(soy`
           {namespace test.ts}
 
@@ -239,7 +240,7 @@ describe('grimlock', () => {
         expect(result.diagnostics[0].message).toContain('unknown identifier');
         expect(() => {
           // tslint:disable-next-line:no-unused-expression Check for throw
-          result.output;
+          result.files[0].content;
         }).toThrow();
       });
 
@@ -255,7 +256,7 @@ describe('grimlock', () => {
           export const t = (a: string) => html\`\${a}\`;
         `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -297,7 +298,7 @@ describe('grimlock', () => {
             export const t = (a: string, b: string) => html\`\${a ${op} b}\`;
           `
           );
-          expect(result.output).toEqual(soy`
+          expect(result.files[0].content).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -326,7 +327,7 @@ describe('grimlock', () => {
           }</div>\`;
       `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -356,7 +357,7 @@ describe('grimlock', () => {
           <div>\${1 + (yes ? 1 : 2)}</div>\`;
       `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -384,7 +385,7 @@ describe('grimlock', () => {
         expect(result.diagnostics[1].message).toContain('!== is disallowed');
         expect(() => {
           // tslint:disable-next-line:no-unused-expression Check for throw
-          result.output;
+          result.files[0].content;
         }).toThrow();
       });
 
@@ -400,7 +401,7 @@ describe('grimlock', () => {
           export const t = (a: string[]) => html\`\${a.length}\`;
         `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -423,7 +424,7 @@ describe('grimlock', () => {
           export const t = (a: string) => html\`\${a.length}\`;
         `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -446,7 +447,7 @@ describe('grimlock', () => {
           export const t = (a: string) => html\`\${a.includes('a')}\`;
         `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
           {namespace test.ts}
 
           {template .t}
@@ -473,7 +474,7 @@ describe('grimlock', () => {
             \`;
           `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -507,7 +508,7 @@ describe('grimlock', () => {
             \`;
           `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -547,7 +548,7 @@ describe('grimlock', () => {
             };
           `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
             {namespace test.ts}
 
             {template .t}
@@ -573,7 +574,7 @@ describe('grimlock', () => {
             };
           `
         );
-        expect(result.output).toEqual(soy`
+        expect(result.files[0].content).toEqual(soy`
             {namespace test.ts}
 
             {template .t}

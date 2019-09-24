@@ -19,16 +19,25 @@ export interface OutputFile {
   content: string;
 }
 
-/*
- * TODO (justinfagnani): we need a type / parameter to represent defined
- *     elements, so that when they're encountered we can generate the correct
- *     Soy call command to their template.
+/**
+ * Information for debugging.
  */
+export interface Diagnostic {
+  fileName: string;
+  line: number;
+  character: number;
+  message: string;
+}
+
 /**
  * Generates one or more files from the given SourceFile.
  */
 export type Generator = (
   sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker,
+  program: ts.Program,
+  languageServiceHost: ts.LanguageServiceHost,
   rootDir: string
-) => Array<OutputFile>;
+) => {
+  files: Array<OutputFile>,
+  diagnostics: Array<Diagnostic>,
+};
