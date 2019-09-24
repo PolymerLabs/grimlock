@@ -23,6 +23,7 @@ const compilerOptions = {
   experimentalDecorators: true,
   skipDefaultLibCheck: true,
   skipLibCheck: true,
+  moduleResolution: ts.ModuleResolutionKind.NodeJs,
 };
 
 /* TODO(justinfagnani): Pick a better name */
