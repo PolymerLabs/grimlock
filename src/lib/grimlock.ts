@@ -14,8 +14,8 @@
 
 import * as path from 'path';
 import ts from 'typescript';
-import {SourceFileConverter} from './source-file-converter.js';
 import {OverlayLanguageServiceHost} from './overlay-language-service-host.js';
+import {Generator, OutputFile, Diagnostic} from './generator.js';
 
 const compilerOptions = {
   target: ts.ScriptTarget.ES2017,
@@ -28,10 +28,12 @@ const compilerOptions = {
 
 /* TODO(justinfagnani): Pick a better name */
 export class Grimlock {
+  generators: Generator[];
   languageServiceHost: OverlayLanguageServiceHost;
   languageService: ts.LanguageService;
 
-  constructor(packageRoot: string) {
+  constructor(packageRoot: string, generators: Generator[]) {
+    this.generators = generators;
     this.languageServiceHost = new OverlayLanguageServiceHost(
       packageRoot,
       compilerOptions
@@ -45,8 +47,7 @@ export class Grimlock {
   convertModule(
     fileName: string,
     source: string,
-    definedElements?: {[tagName: string]: string}
-  ) {
+  ): {files: OutputFile[], diagnostics: Diagnostic[]} {
     const testPath = path.resolve(__dirname, fileName);
     const existingFile = this.languageServiceHost.files.get(testPath);
     const version = existingFile === undefined ? 0 : existingFile.version + 1;
@@ -64,28 +65,15 @@ export class Grimlock {
       throw new Error('syntax errors in test input');
     }
 
-    const definedElementsMap =
-      definedElements && new Map(Object.entries(definedElements));
-    const converter = new SourceFileConverter(
-      sourceFile,
-      program,
-      this.languageServiceHost,
-      __dirname,
-      definedElementsMap
-    );
-    const ast = converter.convertFile();
+    let output = this.generators.map((generator) => generator(sourceFile, program, this.languageServiceHost, __dirname));
+    // Flatten output files and diagnostics from different generators into
+    // single arrays.
+    let outputFiles = output.map((o) => o.files).reduce((last, cur) => last.concat(cur));
+    let outputDiagnostics = output.map((o) => o.diagnostics).reduce((last, cur) => last.concat(cur));
 
     return {
-      ast,
-      get output() {
-        let output = '';
-        for (const s of ast.emit()) {
-          output += s;
-        }
-        return output.trim();
-      },
-      diagnostics: converter.diagnostics,
-      converter,
-    };
+      files: outputFiles,
+      diagnostics: outputDiagnostics,
+    }
   }
 }

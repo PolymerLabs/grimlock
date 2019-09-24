@@ -16,11 +16,12 @@ import 'jasmine';
 
 import * as path from 'path';
 import {Grimlock} from '../lib/grimlock.js';
+import {SourceFileGenerator} from '../lib/source-file-generator.js';
 import {js, soy} from '../lib/utils.js';
 
 describe('grimlock', () => {
   const packageRoot = path.resolve(__dirname, '../');
-  const grimlock = new Grimlock(packageRoot);
+  const grimlock = new Grimlock(packageRoot, [SourceFileGenerator]);
 
   describe('lit-element', () => {
     it('converts a LitElement', () => {
@@ -41,7 +42,7 @@ describe('grimlock', () => {
       }
     `
       );
-      expect(result.output).toEqual(
+      expect(result.files[0].content).toEqual(
         soy`
         {namespace test.ts}
         
@@ -79,7 +80,7 @@ describe('grimlock', () => {
     }
   `
     );
-    expect(result.output).toEqual(
+    expect(result.files[0].content).toEqual(
       soy`
       {namespace test.ts}
       
@@ -95,56 +96,6 @@ describe('grimlock', () => {
       {template .MyElement_shadow}
         {@param name: string}
       <h1>Hello {$name}</h1>
-      {/template}`
-    );
-  });
-
-  it('supports defined custom elements', () => {
-    const result = grimlock.convertModule(
-      'test.ts',
-      js`
-    import {LitElement, html} from 'lit-element';
-    import {customElement, property} from 'lit-element/lib/decorators.js';
-
-    /**
-     * @soyCompatible
-     */
-    @customElement('my-element')
-    export class MyElement extends LitElement {
-      @property() name: string;
-
-      render() {
-        return html\`
-          <h1>Hello \${this.name}</h1>
-          <child-element><div>child content \${this.name}</div></child-element>
-        \`;
-      }
-    }
-  `,
-      {'child-element': 'ChildElement'}
-    );
-    expect(result.output).toEqual(
-      soy`
-      {namespace test.ts}
-      
-      {template .MyElement}
-        {@param children: string}
-        {@param name: string}
-      <my-element>
-      {$children}
-      {call .MyElement_shadow}{param name: $name /}
-      {/call}</my-element>
-      {/template}
-      
-      {template .MyElement_shadow}
-        {@param name: string}
-      
-            <h1>Hello {$name}</h1>
-            {call .ChildElement}
-      {param children kind="html"}<div>child content {$name}</div>
-      {/param}
-      {/call}
-          
       {/template}`
     );
   });
@@ -172,7 +123,7 @@ describe('grimlock', () => {
     }
   `
     );
-    expect(result.output).toEqual(
+    expect(result.files[0].content).toEqual(
       soy`
       {namespace test.ts}
       
@@ -217,7 +168,7 @@ describe('grimlock', () => {
       'referenced properties must be annotated with @property()'
     );
     expect(() => {
-      result.output;
+      result.files[0].content;
     }).toThrow();
   });
 
@@ -242,7 +193,7 @@ describe('grimlock', () => {
       }
     `
       );
-      expect(result.output).toEqual(
+      expect(result.files[0].content).toEqual(
         soy`
         {namespace test.ts}
         
@@ -281,7 +232,7 @@ describe('grimlock', () => {
       }
     `
       );
-      expect(result.output).toEqual(
+      expect(result.files[0].content).toEqual(
         soy`
         {namespace test.ts}
         
@@ -318,7 +269,7 @@ describe('grimlock', () => {
       );
       expect(result.diagnostics.length).toBeGreaterThan(0);
       expect(result.diagnostics[0].message).toContain('unknown class method');
-      expect(result.output).toEqual(
+      expect(result.files[0].content).toEqual(
         soy`
         {namespace test.ts}
         
@@ -357,7 +308,7 @@ describe('grimlock', () => {
       expect(result.diagnostics[0].message).toContain(
         'event bindings must be instance method references: console.log'
       );
-      expect(result.output).toEqual(
+      expect(result.files[0].content).toEqual(
         soy`
         {namespace test.ts}
         

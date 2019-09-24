@@ -19,6 +19,7 @@ import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
 import {getReflectedAttributeName} from './reflected-attribute-name.js';
+import {Diagnostic} from './generator.js';
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -90,13 +91,6 @@ const arrayType: SimpleType = {
   type: {kind: SimpleTypeKind.ANY},
 };
 
-export interface Diagnostic {
-  fileName: string;
-  line: number;
-  character: number;
-  message: string;
-}
-
 export interface TemplateScope {
   scopes: Array<ts.FunctionLikeDeclarationBase | Set<ts.Declaration>>;
   element?: ts.ClassDeclaration;
@@ -122,14 +116,13 @@ export class SourceFileConverter {
     program: ts.Program,
     languageServiceHost: ts.LanguageServiceHost,
     rootDir: string,
-    definedElements?: Map<string, string>
   ) {
     this.sourceFile = sourceFile;
     this.program = program;
     this.checker = program.getTypeChecker();
     this.languageServiceHost = languageServiceHost;
     this.rootDir = rootDir;
-    this.definedElements = definedElements || new Map();
+    this.definedElements = new Map();
 
     const symbols = this.checker.getSymbolsInScope(
       sourceFile,
