@@ -71,8 +71,11 @@ describe('grimlock', () => {
           export const t = () => html\`<div></div>\`;
           `
         );
-        expect(result.diagnostics.length).toEqual(1);
-        expect(result.diagnostics[0].message).toContain(
+        expect(result.diagnostics.length).toEqual(2);
+        expect(result.diagnostics[0].message).toEqual(
+          "The module 'lit-html' is not included by the program's source."
+        );
+        expect(result.diagnostics[1].message).toContain(
           'must return a TemplateResult'
         );
       });

@@ -104,6 +104,8 @@ export interface TemplateScope {
 
 export class SourceFileConverter {
   diagnostics: Diagnostic[] = [];
+  program: ts.Program;
+  languageServiceHost: ts.LanguageServiceHost;
   sourceFile: ts.SourceFile;
   checker: ts.TypeChecker;
   rootDir: string;
@@ -111,15 +113,21 @@ export class SourceFileConverter {
 
   _stringIncludesSymbol: ts.Symbol;
   _arrayMapSymbol: ts.Symbol;
+  private htmlSymbol?: ts.Symbol;
+  private propertySymbol?: ts.Symbol;
+  private customElementSymbol?: ts.Symbol;
 
   constructor(
     sourceFile: ts.SourceFile,
-    checker: ts.TypeChecker,
+    program: ts.Program,
+    languageServiceHost: ts.LanguageServiceHost,
     rootDir: string,
     definedElements?: Map<string, string>
   ) {
     this.sourceFile = sourceFile;
-    this.checker = checker;
+    this.program = program;
+    this.checker = program.getTypeChecker();
+    this.languageServiceHost = languageServiceHost;
     this.rootDir = rootDir;
     this.definedElements = definedElements || new Map();
 
@@ -132,6 +140,55 @@ export class SourceFileConverter {
 
     const arraySymbol = symbols.filter((s) => s.name === 'Array')[0];
     this._arrayMapSymbol = arraySymbol.members!.get('map' as any)!;
+
+    const htmlSymbolSearchResults = this.getExportOfModule('lit-html', 'html');
+    if (htmlSymbolSearchResults.symbol === undefined) {
+      // `html` must be imported in the source file. If it is not, report why
+      // TypeScript couldn't find it.
+      this.report(sourceFile, htmlSymbolSearchResults.errorMessage);
+    }
+    this.htmlSymbol = htmlSymbolSearchResults.symbol;
+    this.propertySymbol = this.getExportOfModule('lit-element', 'property').symbol;
+    this.customElementSymbol = this.getExportOfModule('lit-element', 'customElement').symbol;
+  }
+
+  /**
+   * Return the symbol named `symbolName` exported from the module named `moduleName`.
+   * If the module or symbol can't be found, return `undefined` and the reason for
+   * resolution failure.
+   *
+   * @param moduleName The name of the module to check.
+   * @param symbolName The name of the symbol to look for.
+   */
+  getExportOfModule(moduleName: string, symbolName: string): {
+    symbol: ts.Symbol | undefined,
+    errorMessage: string,
+  } {
+    const moduleInfo = ts.resolveModuleName(
+      moduleName,
+      this.sourceFile.fileName,
+      this.languageServiceHost.getCompilationSettings(),
+      this.languageServiceHost as ts.ModuleResolutionHost
+    ).resolvedModule;
+
+    if (moduleInfo === undefined) {
+      return {symbol: undefined, errorMessage: `TypeScript couldn't resolve the module '${moduleName}'.`};
+    }
+
+    const moduleEntryFileName = moduleInfo.resolvedFileName;
+    const moduleFile = this.program.getSourceFiles().find((sf) => sf.fileName === moduleEntryFileName)!;
+
+    if (moduleFile === undefined) {
+      return {symbol: undefined, errorMessage: `The module '${moduleName}' is not included by the program's source.`};
+    }
+
+    const moduleFileSymbol = this.checker.getSymbolAtLocation(moduleFile)!;
+
+    const symbol = this.checker.getExportsOfModule(moduleFileSymbol).find((symbol) => symbol.name === symbolName);
+    if (symbol === undefined) {
+      return {symbol: undefined, errorMessage: `Can't find export '${symbolName}' in '${moduleName}'`};
+    }
+    return {symbol, errorMessage: ''};
   }
 
   convertFile() {
@@ -834,14 +891,38 @@ export class SourceFileConverter {
     );
   }
 
+  /**
+   * Follow all aliases, such as imports, for the given node. Return the original
+   * symbol.
+   *
+   * @param node The node to check. It can be any node type but this will return
+   *     undefined for non-Itentifiers.
+   */
+  getOriginalSymbol(identifier: ts.Identifier): ts.Symbol {
+    let symbol = this.checker.getSymbolAtLocation(identifier);
+    if (symbol === undefined || symbol.declarations.length === 0) {
+      throw `Could not find symbol for identifier: ${identifier.getText()}`
+    }
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = this.checker.getAliasedSymbol(symbol);
+    }
+    return symbol;
+  }
+
   isLitHtmlTaggedTemplate(node: ts.Node): node is ts.TaggedTemplateExpression {
+    if (this.htmlSymbol === undefined) {
+      return false;
+    }
     return (
       ts.isTaggedTemplateExpression(node) &&
-      this.isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])
+      this.getOriginalSymbol(node.tag as ts.Identifier) === this.htmlSymbol
     );
   }
 
   isLitElementProperty(node: ts.PropertyDeclaration) {
+    if (this.propertySymbol === undefined) {
+      return false;
+    }
     const decorators = node.decorators;
     if (decorators === undefined) {
       return false;
@@ -853,7 +934,7 @@ export class SourceFileConverter {
       }
       const receiver = expr.expression;
       if (
-        this.isImportOf(receiver, 'property', 'lit-element/lib/decorators.js')
+        this.getOriginalSymbol(receiver as ts.Identifier) === this.propertySymbol
       ) {
         return true;
       }
@@ -910,55 +991,6 @@ export class SourceFileConverter {
       ts.isParameter(declaration) &&
       declaration.parent === f
     );
-  }
-
-  /**
-   * Returns true if `node` is an identifier that references the import named
-   * `name` from a module with specifier `specifier`.
-   *
-   * @param node The node to check. It can be any node type but this will return
-   *     false for non-Itentifiers.
-   * @param name The imported symbol name.
-   * @param specifier. Either a single import specifier, or an array of
-   *     specifiers.
-   * @example
-   *
-   * ```
-   *   if (isImportOf(node.tag, 'html', ['lit-html', 'lit-element'])) {
-   *     // node is a lit-html template
-   *   }
-   * ```
-   */
-  isImportOf(node: ts.Node, name: string, specifier: string | string[]) {
-    if (!ts.isIdentifier(node)) {
-      return false;
-    }
-    const symbol = this.checker.getSymbolAtLocation(node);
-    if (symbol === undefined || symbol.declarations.length === 0) {
-      return false;
-    }
-    const declaration = symbol.declarations[0];
-    if (
-      declaration.kind !== ts.SyntaxKind.ImportSpecifier ||
-      declaration.parent.kind !== ts.SyntaxKind.NamedImports
-    ) {
-      return false;
-    }
-    const imports = declaration.parent as ts.NamedImports;
-    const importDeclaration = imports.parent.parent;
-    const importName = declaration.getText();
-    const specifierNode = importDeclaration.moduleSpecifier as ts.StringLiteral;
-    const specifierText = specifierNode.text;
-    if (Array.isArray(specifier)) {
-      for (const s of specifier) {
-        if (importName === name && specifierText === s) {
-          return true;
-        }
-      }
-      return false;
-    } else {
-      return importName === name && specifierText === specifier;
-    }
   }
 
   getIdentifierDeclaration(node: ts.Identifier) {
@@ -1073,6 +1105,9 @@ export class SourceFileConverter {
   }
 
   getCustomElementName(node: ts.ClassDeclaration): string | undefined {
+    if (this.customElementSymbol === undefined) {
+      return;
+    }
     if (node.decorators === undefined) {
       return;
     }
@@ -1081,13 +1116,7 @@ export class SourceFileConverter {
         continue;
       }
       const call = decorator.expression;
-      if (
-        this.isImportOf(
-          call.expression,
-          'customElement',
-          'lit-element/lib/decorators.js'
-        )
-      ) {
+      if (this.getOriginalSymbol(call.expression as ts.Identifier) === this.customElementSymbol) {
         const args = call.arguments;
         if (args.length !== 1) {
           this.report(call, 'wrong number of arguments to customElement');
