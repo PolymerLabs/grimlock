@@ -16,12 +16,12 @@ import 'jasmine';
 
 import * as path from 'path';
 import {Grimlock} from '../lib/grimlock.js';
-import {SourceFileGenerator} from '../lib/source-file-generator.js';
+import {SoyGenerator} from '../lib/soy-generator.js';
 import {js, soy} from '../lib/utils.js';
 
 describe('grimlock', () => {
   const packageRoot = path.resolve(__dirname, '../');
-  const grimlock = new Grimlock(packageRoot, [SourceFileGenerator]);
+  const grimlock = new Grimlock(packageRoot, [SoyGenerator]);
 
   describe('lit-html', () => {
     describe('template function declaration', () => {

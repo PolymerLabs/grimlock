@@ -19,7 +19,26 @@ import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
 import {getReflectedAttributeName} from './reflected-attribute-name.js';
-import {Diagnostic} from './generator.js';
+import {Generator, OutputFile, Diagnostic} from './generator.js';
+
+/**
+ * Generates Soy templates from a source file containing lit-html templates
+ * and/or LitElements. Wraps the functionality of SoyConverter as a method.
+ */
+export const SoyGenerator: Generator = (
+  sourceFile: ts.SourceFile,
+  program: ts.Program,
+  languageServiceHost: ts.LanguageServiceHost,
+  rootDir: string,
+) => {
+  const converter = new SoyConverter(
+    sourceFile,
+    program,
+    languageServiceHost,
+    rootDir
+  );
+  return converter.convertFile();
+}
 
 const isTextNode = (
   node: parse5.AST.Default.Node
@@ -96,7 +115,11 @@ export interface TemplateScope {
   element?: ts.ClassDeclaration;
 }
 
-export class SourceFileConverter {
+/**
+ * Converts Soy templates from a source file containing lit-html templates
+ * and/or LitElements.
+ */
+export class SoyConverter {
   diagnostics: Diagnostic[] = [];
   program: ts.Program;
   languageServiceHost: ts.LanguageServiceHost;
@@ -196,7 +219,25 @@ export class SourceFileConverter {
         commands.push(...this.convertLitElement(node));
       }
     });
-    return new ast.File(commands);
+    const outputAST = new ast.File(commands);
+
+    const outputFilename = this.sourceFile.fileName.replace('.ts', '.soy');
+    const outputFile: OutputFile = {
+      get content() {
+        let output = '';
+        for (const s of outputAST.emit()) {
+          output += s;
+        }
+        return output.trim();
+      },
+      filename: outputFilename
+    }
+  
+    return {
+      files: [outputFile],
+      diagnostics: this.diagnostics
+    };
+  
   }
 
   convertLitElement(node: ts.ClassDeclaration): ast.Command[] {
