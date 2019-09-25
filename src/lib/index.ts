@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {Grimlock} from './grimlock.js';
-import {SourceFileGenerator} from './source-file-generator.js';
+import {SoyGenerator} from './soy-generator.js';
 
 const packageRoot = path.resolve(__dirname, '../');
 
@@ -29,7 +29,7 @@ const main = () => {
     process.exitCode = 1;
     return;
   }
-  const grimlock = new Grimlock(packageRoot, [SourceFileGenerator]);
+  const grimlock = new Grimlock(packageRoot, [SoyGenerator]);
   const input = fs.readFileSync(inFile, 'utf8');
   const outputFiles = grimlock.convertModule(inFile, input).files;
   for (const file of outputFiles) {
