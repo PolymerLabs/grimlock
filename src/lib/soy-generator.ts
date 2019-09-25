@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
-import {getReflectedAttributeName} from './reflected-attribute-name.js';
+import {getReflectedAttribute} from './reflected-attribute-name.js';
 import {Generator, OutputFile, Diagnostic} from './generator.js';
 
 /**
@@ -500,18 +500,20 @@ export class SoyConverter {
             commands.push(new ast.RawText(`<${node.tagName}`));
           }
           for (let {name, value} of node.attrs) {
+            let isBoolean = false;
             if (name.startsWith('.')) {
               // Need to get name from source to ensure proper casing.
               const attributeName = lastAttributeNameRegex.exec(
                 strings[partTypes.length]
               )![2];
               const propertyName = attributeName.slice(1);
-              const reflectedAttributeName = getReflectedAttributeName(
+              const reflectedAttribute = getReflectedAttribute(
                 propertyName,
                 node.tagName
               );
-              if (reflectedAttributeName !== undefined) {
-                name = reflectedAttributeName;
+              if (reflectedAttribute !== undefined) {
+                name = reflectedAttribute.name;
+                isBoolean = reflectedAttribute.isBoolean;
               } else {
                 partTypes.push('attribute');
                 continue;
@@ -540,7 +542,34 @@ export class SoyConverter {
               continue;
             }
             const textLiterals = value.split(markerRegex);
-            commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
+
+            const isBound = textLiterals.length > 1;
+            if (!isBound) {
+              commands.push(new ast.RawText(` ${name}="${value}"`));
+              continue;
+            }
+
+            if (isBoolean) {
+              // There should be one expression.
+              const booleanExpression = this.convertExpression(
+                expressions[partTypes.length],
+                scope
+              );
+              commands.push(new ast.RawText(' '));
+              commands.push(
+                new ast.IfCommand(
+                  booleanExpression,
+                  [new ast.RawText(name)],
+                  [],
+                  true
+                )
+              );
+              partTypes.push('attribute');
+              continue;
+            }
+
+            commands.push(new ast.RawText(` ${name}="`));
+            commands.push(new ast.RawText(textLiterals[0]));
             for (const textLiteral of textLiterals.slice(1)) {
               commands.push(
                 this.convertAttributeExpression(

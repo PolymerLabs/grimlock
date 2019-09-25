@@ -177,30 +177,35 @@ export class IfCommand extends Command {
   condition: Expression;
   whenTrue: Command[];
   whenFalse: Command[];
+  private separator: string;
 
   constructor(
     condition: Expression,
     whenTrue: Command[],
-    whenFalse: Command[]
+    whenFalse: Command[] = [],
+    inline: Boolean = false,
   ) {
     super();
     this.condition = condition;
     this.whenTrue = whenTrue;
     this.whenFalse = whenFalse;
+    this.separator = inline ? '' : '\n';
   }
 
   *emit() {
-    yield '\n{if ';
+    yield `${this.separator}{if `;
     yield* this.condition.emit();
-    yield '}\n';
+    yield `}${this.separator}`;
     for (const c of this.whenTrue) {
       yield* c.emit();
     }
-    yield '\n{else}\n';
-    for (const c of this.whenFalse) {
-      yield* c.emit();
+    if (this.whenFalse.length > 0) {
+      yield `${this.separator}{else}${this.separator}`;
+      for (const c of this.whenFalse) {
+        yield* c.emit();
+      }
     }
-    yield '\n{/if}\n';
+    yield `${this.separator}{/if}${this.separator}`;
   }
 }
 
