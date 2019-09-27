@@ -550,7 +550,21 @@ export class SoyConverter {
             }
 
             if (isBoolean) {
-              // There should be one expression.
+              // Check that the value of this attribute consists entirely of a single binding.
+              // This requirement is necessary because if the value contained anything more,
+              // the Soy AST expression would require string concatenation of text literals
+              // and expressions.
+              const containsMultipleBindings = textLiterals.length > 2;
+              const containsOtherText = textLiterals.some((literal) => literal !== '');
+              if (containsMultipleBindings || containsOtherText) {
+                this.report(
+                  templateLiteral,
+                  `boolean attribute ${name} must only contain a single expression.`
+                );
+                partTypes.push(...Array(textLiterals.length - 1).fill('attribute'));
+                continue;
+              }
+
               const booleanExpression = this.convertExpression(
                 expressions[partTypes.length],
                 scope

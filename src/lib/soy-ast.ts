@@ -183,7 +183,7 @@ export class IfCommand extends Command {
     condition: Expression,
     whenTrue: Command[],
     whenFalse: Command[] = [],
-    inline: Boolean = false,
+    inline = false,
   ) {
     super();
     this.condition = condition;

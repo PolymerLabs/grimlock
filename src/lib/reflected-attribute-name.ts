@@ -1,21 +1,45 @@
-class Reflection {
+/**
+ * @license
+ * Copyright (c) 2019 The Polymer Project Authors. All rights reserved.
+ * This code may only be used under the BSD style license found at
+ * http://polymer.github.io/LICENSE.txt
+ * The complete set of authors may be found at
+ * http://polymer.github.io/AUTHORS.txt
+ * The complete set of contributors may be found at
+ * http://polymer.github.io/CONTRIBUTORS.txt
+ * Code distributed by Google as part of the polymer project is also
+ * subject to an additional IP rights grant found at
+ * http://polymer.github.io/PATENTS.txt
+ */
+
+/**
+ * Represents a JavaScript property that reflects as an HTML attribute.
+ */
+class ReflectedProperty {
   public propertyName: string;
   public attributeName: string;
-  public isBoolean: boolean = false;
+  public isBoolean: boolean;
 
-  constructor(propertyName: string, attributeName?: string) {
+  constructor(propertyName: string, options: ReflectedPropertyOptions = {}) {
     this.propertyName = propertyName;
-    if (attributeName !== undefined) {
-      this.attributeName = attributeName;
-    } else {
-      this.attributeName = propertyName
-    }
+    this.attributeName = options.attributeName === undefined ? propertyName : options.attributeName;
+    this.isBoolean = options.isBoolean === undefined ? false : options.isBoolean;
   }
+}
 
-  setBoolean() {
-    this.isBoolean = true;
-    return this;
-  }
+/**
+ * Options for the ReflectedProperty class.
+ */
+interface ReflectedPropertyOptions {
+  /**
+   * If present, indicates the reflected attribute name differs from the property name.
+   */
+  attributeName?: string
+
+  /**
+   * Whether the property reflects to an HTML boolean attribute.
+   */
+  isBoolean?: boolean
 }
 
 /**
@@ -30,63 +54,68 @@ class Reflection {
  * rest:  Array of ([property name, reflected attribute name] or
  *        property name (if reflected attribute name is identical).
  */
-const reflectedAttributesSource: Array<{
+const reflectedPropertiesSource: Array<{
   tagNames: string[];
-  reflections: Reflection[];
+  reflectedProperties: ReflectedProperty[];
 }> = [
   {
     tagNames: ['input', 'option'],
-    reflections: [new Reflection('value')],
+    reflectedProperties: [new ReflectedProperty('value')],
   },
   {
     tagNames: ['input'],
-    reflections: [
-      new Reflection('checked').setBoolean(),
-      new Reflection('disabled').setBoolean(),
-      new Reflection('indeterminate').setBoolean()
+    reflectedProperties: [
+      new ReflectedProperty('checked', {isBoolean: true}),
+      new ReflectedProperty('disabled', {isBoolean: true}),
+      new ReflectedProperty('indeterminate', {isBoolean: true})
     ],
   },
   {
     tagNames: ['*'],
-    reflections: [
-      new Reflection('className', 'class'),
-      new Reflection('id')
+    reflectedProperties: [
+      new ReflectedProperty('className', {attributeName: 'class'}),
+      new ReflectedProperty('id')
     ],
   },
 ];
 
-// reflectedAttributesSource is easy to visually parse, but we can reconfigure the
-// data structure into a map of maps for faster lookup at runtime.
-// Example entry: {'*': {'className': Reflection}}
-const reflectedAttributes = new Map<string, Map<string, Reflection>>();
+
+// `reflectedAttributesSource` is easy to visually parse, but the data can be restructured
+// as a map of maps, `reflectedProperties`, for faster runtime lookup.
+// Example entry:
+// { '*': { 'className': new ReflectedProperty('className', {attributeName: 'class'}) } }
+const reflectedProperties = new Map<string, Map<string, ReflectedProperty>>();
 const addReflectionForElement = (
   elementName: string,
-  reflection: Reflection
+  reflectedProperty: ReflectedProperty
 ) => {
-  let reflectedAttribute = reflectedAttributes.get(elementName);
+  let reflectedAttribute = reflectedProperties.get(elementName);
   if (reflectedAttribute === undefined) {
     reflectedAttribute = new Map();
-    reflectedAttributes.set(elementName, reflectedAttribute);
+    reflectedProperties.set(elementName, reflectedAttribute);
   }
-  reflectedAttribute.set(reflection.propertyName, reflection);
+  reflectedAttribute.set(reflectedProperty.propertyName, reflectedProperty);
 };
 const addReflectionsForElement = (
   elementName: string,
-  reflections: Reflection[]
+  reflectedProperties: ReflectedProperty[]
 ) => {
-  for (const reflection of reflections) {
-    addReflectionForElement(elementName, reflection);
+  for (const reflectedProperty of reflectedProperties) {
+    addReflectionForElement(elementName, reflectedProperty);
   }
 };
-for (const entry of reflectedAttributesSource) {
+for (const entry of reflectedPropertiesSource) {
   for (const elementName of entry.tagNames) {
-    addReflectionsForElement(elementName, entry.reflections);
+    addReflectionsForElement(elementName, entry.reflectedProperties);
   }
 }
 
 /**
- * Given a property name and element tag name, return the name and type of the corresponding
- * reflected attribute, or undefined if it doesn't exist.
+ * Given a `propertyName` and element `tagName`, return the name and type of the corresponding
+ * reflected attribute, or undefined if it doesn't exist for that tag name.
+ *
+ * @param propertyName The name of a JavaScript property
+ * @param tagName The tag name of an HTML element
  */
 export const getReflectedAttribute = (
   propertyName: string,
@@ -95,12 +124,12 @@ export const getReflectedAttribute = (
   name: string,
   isBoolean: boolean
 } | undefined => {
-  const attributes = reflectedAttributes.get(tagName);
+  const properties = reflectedProperties.get(tagName);
   let reflection;
-  if (attributes !== undefined && attributes.has(propertyName)) {
-    reflection = attributes.get(propertyName)!;
+  if (properties !== undefined && properties.has(propertyName)) {
+    reflection = properties.get(propertyName)!;
   } else {
-    reflection = reflectedAttributes.get('*')!.get(propertyName);
+    reflection = reflectedProperties.get('*')!.get(propertyName);
     if (reflection === undefined) {
       return undefined;
     }
