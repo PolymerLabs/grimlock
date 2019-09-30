@@ -545,7 +545,11 @@ export class SoyConverter {
 
             const isBound = textLiterals.length > 1;
             if (!isBound) {
-              commands.push(new ast.RawText(` ${name}="${value}"`));
+              const attrLocation = node.__location!.attrs[name.toLowerCase()];
+              // Re-slice from raw HTML to preserve exactly how the user wrote the attribute.
+              // For example, doing this respects `checked=""` and `checked`, both of which
+              // are valid HTML.
+              commands.push(new ast.RawText(` ${html.slice(attrLocation.startOffset, attrLocation.endOffset)}`));
               continue;
             }
 

@@ -172,7 +172,7 @@ describe('grimlock', () => {
                * @soyCompatible
                */
               export const t = () => {
-                return html\`<input disabled>\`
+                return html\`<input disabled="" checked>\`
               };
             `
           ).files[0].content
@@ -180,7 +180,7 @@ describe('grimlock', () => {
           {namespace test.ts}
 
           {template .t}
-          <input disabled="">
+          <input disabled="" checked>
           {/template}
         `);
       })
