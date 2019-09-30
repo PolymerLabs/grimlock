@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as ast from './soy-ast.js';
 import * as parse5 from 'parse5';
 import {traverseHtml} from './utils.js';
-import {getReflectedAttributeName} from './reflected-attribute-name.js';
+import {getReflectedAttribute} from './reflected-attribute-name.js';
 import {Generator, OutputFile, Diagnostic} from './generator.js';
 
 /**
@@ -500,18 +500,20 @@ export class SoyConverter {
             commands.push(new ast.RawText(`<${node.tagName}`));
           }
           for (let {name, value} of node.attrs) {
+            let isBoolean = false;
             if (name.startsWith('.')) {
               // Need to get name from source to ensure proper casing.
               const attributeName = lastAttributeNameRegex.exec(
                 strings[partTypes.length]
               )![2];
               const propertyName = attributeName.slice(1);
-              const reflectedAttributeName = getReflectedAttributeName(
+              const reflectedAttribute = getReflectedAttribute(
                 propertyName,
                 node.tagName
               );
-              if (reflectedAttributeName !== undefined) {
-                name = reflectedAttributeName;
+              if (reflectedAttribute !== undefined) {
+                name = reflectedAttribute.name;
+                isBoolean = reflectedAttribute.isBoolean;
               } else {
                 partTypes.push('attribute');
                 continue;
@@ -540,7 +542,52 @@ export class SoyConverter {
               continue;
             }
             const textLiterals = value.split(markerRegex);
-            commands.push(new ast.RawText(` ${name}="${textLiterals[0]}`));
+
+            const isBound = textLiterals.length > 1;
+            if (!isBound) {
+              const attrLocation = node.__location!.attrs[name.toLowerCase()];
+              // Re-slice from raw HTML to preserve exactly how the user wrote the attribute.
+              // For example, doing this respects `checked=""` and `checked`, both of which
+              // are valid HTML.
+              commands.push(new ast.RawText(` ${html.slice(attrLocation.startOffset, attrLocation.endOffset)}`));
+              continue;
+            }
+
+            if (isBoolean) {
+              // Check that the value of this attribute consists entirely of a single binding.
+              // This requirement is necessary because if the value contained anything more,
+              // the Soy AST expression would require string concatenation of text literals
+              // and expressions.
+              const containsMultipleBindings = textLiterals.length > 2;
+              const containsOtherText = textLiterals.some((literal) => literal !== '');
+              if (containsMultipleBindings || containsOtherText) {
+                this.report(
+                  templateLiteral,
+                  `boolean attribute ${name} must only contain a single expression.`
+                );
+                partTypes.push(...Array(textLiterals.length - 1).fill('attribute'));
+                continue;
+              }
+
+              const booleanExpression = this.convertExpression(
+                expressions[partTypes.length],
+                scope
+              );
+              commands.push(new ast.RawText(' '));
+              commands.push(
+                new ast.IfCommand(
+                  booleanExpression,
+                  [new ast.RawText(name)],
+                  [],
+                  true
+                )
+              );
+              partTypes.push('attribute');
+              continue;
+            }
+
+            commands.push(new ast.RawText(` ${name}="`));
+            commands.push(new ast.RawText(textLiterals[0]));
             for (const textLiteral of textLiterals.slice(1)) {
               commands.push(
                 this.convertAttributeExpression(
@@ -1051,14 +1098,18 @@ export class SoyConverter {
    * traverse and convert the type AST here. For now we'll use some simple
    * assignability checks.
    *
-   * @param node A node like a ParameterDeclaration that has a .type property.
+   * @param node A NamedDeclaration node. This will be a ParameterDeclaration
+   *     when checking the type of a parameter of a top-level lit-html
+   *     template function, or a PropertyDeclaration when checking the type
+   *     of a LitElement class property.
    */
-  getSoyTypeOfNode(node: ts.HasType): string | undefined {
-    const typeNode = node.type;
-    if (typeNode === undefined) {
+  getSoyTypeOfNode(node: ts.NamedDeclaration): string | undefined {
+    const symbol = this.checker.getSymbolAtLocation(node.name!);
+    if (symbol === undefined) {
+      this.report(node, 'unknown type');
       return undefined;
     }
-    const type = this.checker.getTypeAtLocation(typeNode);
+    const type = this.checker.getTypeOfSymbolAtLocation(symbol, node);
     const soyType = this.getSoyType(type);
     if (soyType === undefined) {
       this.report(node, 'unknown type');

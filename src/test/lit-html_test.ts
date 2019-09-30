@@ -135,7 +135,6 @@ describe('grimlock', () => {
 
       // TODO: add test cases for
       // - `class` and `.className` on same element
-      // - input with `.value` and `.checked`
       // - `.id`, `.tabIndex`, etc.
       // - event bindings such as `.onclick`
       it('reflecting property expressions', () => {
@@ -161,6 +160,54 @@ describe('grimlock', () => {
                 {/template}
               `);
       });
+
+      it('unbound boolean attributes', () => {
+        expect(
+          grimlock.convertModule(
+            'test.ts',
+            js`
+              import {html} from 'lit-html';
+
+              /**
+               * @soyCompatible
+               */
+              export const t = () => {
+                return html\`<input disabled="" checked>\`
+              };
+            `
+          ).files[0].content
+        ).toEqual(soy`
+          {namespace test.ts}
+
+          {template .t}
+          <input disabled="" checked>
+          {/template}
+        `);
+      })
+
+      it('special native boolean attributes set as bound properties', () => {
+        expect(
+          grimlock.convertModule(
+            'test.ts',
+            js`
+              import {html} from 'lit-html';
+
+              /**
+               * @soyCompatible
+               */
+              export const t = () => {
+                return html\`<input type="checkbox" .checked=\${true} .indeterminate="\${false}">\`
+              };
+            `
+          ).files[0].content
+        ).toEqual(soy`
+          {namespace test.ts}
+
+          {template .t}
+          <input type="checkbox" {if true}checked{/if} {if false}indeterminate{/if}>
+          {/template}
+        `);
+      })
 
       it('error on unsupported statements', () => {
         const result = grimlock.convertModule(
